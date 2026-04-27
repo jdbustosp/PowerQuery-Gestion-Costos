@@ -1,0 +1,89 @@
+let
+    Tol = 0.01,
+
+    // 🔥 MODO ESTRICTO: Carga 100% local. Sin descargas en segundo plano.
+    T_Items_Raw = Table.Buffer(Excel.CurrentWorkbook(){[Name="TbItems"]}[Content]),
+    T_Items = if Table.HasColumns(T_Items_Raw, "Tipo") then T_Items_Raw else Table.AddColumn(T_Items_Raw, "Tipo", each "ITEMS", type text),
+
+    T_Compras = Table.Buffer(Excel.CurrentWorkbook(){[Name="COMPRAS"]}[Content]),
+    T_Contratos = Table.Buffer(Excel.CurrentWorkbook(){[Name="CONTRATOS"]}[Content]),
+    T_Ppto = Table.Buffer(Excel.CurrentWorkbook(){[Name="PPTO_BD"]}[Content]),
+    T_Comp = Table.Buffer(Excel.CurrentWorkbook(){[Name="COMPARATIVOS"]}[Content]),
+    T_Desc = Table.Buffer(Excel.CurrentWorkbook(){[Name="DESCUENTOS"]}[Content]),
+    T_Disp = Table.Buffer(Excel.CurrentWorkbook(){[Name="DISPONIBLE"]}[Content]),
+
+    Origen = Table.Combine({T_Items, T_Compras, T_Contratos, T_Ppto, T_Comp, T_Desc, T_Disp}),
+
+    ColumnasReordenadas = Table.SelectColumns(Origen, 
+        {"Centro de Costos", "Codigo act", "Codigo ins", "Ins", "Actividad", "Capitulo", "Subcapitulo", "Tipo", "# OC / Contrato", "Nombre Contratista", "Descripcion contrato", "# CC - Comparativo", "Clasificador", "Cantidad Proyectado", "VT Proyectado", "Cantidad Consumido", "VT Consumido", "Cantidad Comprado", "V/U Comprado", "VT Comprado", "Cantidad Contratado", "V/U Contratado", "VT Contratado", "Cantidad Presupuesto", "V/U Presupuesto", "VT Presupuesto", "Cant. aprobacion", "V/U aprobacion", "VR total aprobacion", "Valor Total ppto (CC)", "Cantidad Cortes", "VT Cortes", "Valor descuento", "Cantidad_Calc", "V/U ppto (CC)"}, MissingField.Ignore),
+
+    LlavesLimpias = Table.TransformColumns(ColumnasReordenadas, {
+        {"Centro de Costos", each if _ = null then "" else Text.Upper(Text.Trim(Text.From(_))), type text},
+        {"Codigo act", each if _ = null then "" else Text.Upper(Text.Trim(Text.From(_))), type text},
+        {"Ins", each if _ = null then "" else Text.Upper(Text.Trim(Text.From(_))), type text},
+        {"Tipo", each if _ = null then "" else Text.Upper(Text.Trim(Text.From(_))), type text},
+        {"# OC / Contrato", each if _ = null then null else Text.Trim(Text.From(_)), type text} 
+    }, null, MissingField.Ignore),
+
+    FiltroTipoValido = Table.SelectRows(LlavesLimpias, each [Tipo] <> null and [Tipo] <> ""),
+
+    MapaClasificadores = Table.Distinct(Table.SelectRows(Table.SelectColumns(FiltroTipoValido, {"Centro de Costos", "Codigo act", "Ins", "Clasificador"}), each [Clasificador] <> null and Text.Trim(Text.From([Clasificador])) <> ""), {"Centro de Costos", "Codigo act", "Ins"}),
+    CruceClasificador = Table.NestedJoin(FiltroTipoValido, {"Centro de Costos", "Codigo act", "Ins"}, MapaClasificadores, {"Centro de Costos", "Codigo act", "Ins"}, "MapaC", JoinKind.LeftOuter),
+    ExpandirClasificador = Table.ExpandTableColumn(CruceClasificador, "MapaC", {"Clasificador"}, {"Clasificador_Oficial"}),
+
+    BaseSinClasificadorViejo = Table.RemoveColumns(ExpandirClasificador, {"Clasificador"}),
+    BaseClasificada = Table.RenameColumns(BaseSinClasificadorViejo, {{"Clasificador_Oficial", "Clasificador"}}),
+
+    NumCols = {"Cantidad Proyectado", "VT Proyectado", "Cantidad Consumido", "VT Consumido", "Cantidad Comprado", "V/U Comprado", "VT Comprado", "Cantidad Contratado", "V/U Contratado", "VT Contratado", "Cantidad Presupuesto", "V/U Presupuesto", "VT Presupuesto", "Cant. aprobacion", "V/U aprobacion", "VR total aprobacion", "Valor Total ppto (CC)", "Cantidad Cortes", "VT Cortes", "Valor descuento", "Cantidad_Calc", "V/U ppto (CC)"},
+    NumerosSeguros = Table.TransformColumns(BaseClasificada, List.Transform(NumCols, each {_, (v) => let n = try Number.From(v) otherwise 0 in if n = null then 0 else n, type number}), null, MissingField.Ignore),
+
+    AddCantAseg = Table.AddColumn(NumerosSeguros, "Cantidad asegurada", each [Cantidad Contratado] + [Cantidad Comprado], type number),
+    AddVTAseg = Table.AddColumn(AddCantAseg, "VT Asegurada", each [VT Contratado] + [VT Comprado], type number),
+    AddVUAseg = Table.AddColumn(AddVTAseg, "V/U asegurada", each if [Cantidad asegurada] <> 0 then [VT Asegurada] / [Cantidad asegurada] else 0, type number),
+
+    AgrupadoResumen = Table.Group(AddVUAseg, {"Centro de Costos", "Codigo act", "Ins"}, {{"vtProj", each List.Sum([VT Proyectado]), type number}, {"vtCons", each List.Sum([VT Consumido]), type number}, {"vtAseg", each List.Sum([VT Asegurada]), type number}, {"vtAprb", each List.Sum([VR total aprobacion]), type number}}),
+
+    // 🔥 EL MOTOR DE ESCENARIOS ACTUALIZADO CON ESCENARIO 5
+    ResumenEscenarios = Table.AddColumn(AgrupadoResumen, "Motor", each let 
+        vAseg = [vtAseg], 
+        vAprb = [vtAprb], 
+        vProj = [vtProj], 
+        vCons = [vtCons], 
+        
+        E1 = (vAseg > 0) and (vAprb > 0) and (Number.Abs(vAseg - vAprb) <= Tol), 
+        MaxA = if vAseg > vAprb then vAseg else vAprb, 
+        E3 = (vProj <> 0) and (Number.Abs(vProj - vCons) <= Tol) and (vProj < MaxA), 
+        E2 = (vAseg > 0),
+        E4 = (vCons > vAseg),
+        
+        // NUEVO ESCENARIO 5: Si hay valor asegurado pero el consumido es exactamente 0.
+        E5 = (vAseg > 0) and (vCons = 0)
+
+    in [
+        Esc1 = if E1 = null then false else E1, 
+        Esc3 = if E3 = null then false else E3, 
+        Esc2 = if E2 = null then false else E2,
+        Esc4 = if E4 = null then false else E4,
+        Esc5 = if E5 = null then false else E5
+    ]),
+    
+    ExpandirBanderas = Table.ExpandRecordColumn(ResumenEscenarios, "Motor", {"Esc1", "Esc3", "Esc2", "Esc4", "Esc5"}),
+
+    CruceConBase = Table.NestedJoin(AddVUAseg, {"Centro de Costos", "Codigo act", "Ins"}, ExpandirBanderas, {"Centro de Costos", "Codigo act", "Ins"}, "B", JoinKind.Inner),
+    BaseConBanderas = Table.ExpandTableColumn(CruceConBase, "B", {"Esc1", "Esc3", "Esc2", "Esc4", "Esc5"}),
+
+    // LA REGLA DE APLICACIÓN: Orden de prioridad estricto
+    AplicarProyeccion = Table.AddColumn(BaseConBanderas, "VT Proyectado Colsubsidio", each 
+        if [Tipo] = "POR ADJUDICAR" then [#"Valor Total ppto (CC)"] 
+        else if [Esc4] = true then [VT Consumido] 
+        else if [Esc5] = true then 0   // <-- Prioridad: Si no hay consumo, la proyección baja a 0
+        else if [Esc1] = true then [VR total aprobacion] 
+        else if [Esc3] = true then [VT Proyectado] 
+        else if [Esc2] = true then (if [VT Asegurada] <> 0 then [VT Asegurada] else null) 
+        else null, 
+    type number),
+
+    FinalClean = Table.RemoveColumns(AplicarProyeccion, {"Esc1", "Esc3", "Esc2", "Esc4", "Esc5"}),
+    TablaMaestraFinal = Table.Buffer(FinalClean)
+in
+    TablaMaestraFinal
