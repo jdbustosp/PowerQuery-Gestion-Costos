@@ -1,0 +1,85 @@
+let
+    // ============================================================
+    // FUNCIONES AUXILIARES GLOBALES
+    // ============================================================
+    FnFormatCodigoAct = (raw as any) as nullable text => let txtRaw = if raw = null then null else Text.Trim(Text.From(raw)), result = if txtRaw = null or txtRaw = "" then null else let txtNorm = Text.Replace(Text.Replace(txtRaw, ",", "."), " ", ""), hasDot = Text.Contains(txtNorm, ".") in if hasDot then txtNorm else let digits = Text.Select(txtNorm, {"0".."9"}), len = Text.Length(digits) in if len <= 3 then null else Text.Range(digits, 0, len - 3) & "." & Text.Range(digits, len - 3, 3) in result,
+    FxToNumberFlex = (value as any) as nullable number => let v = value, numeroDirecto = if Value.Is(v, type number) then Number.From(v) else null in if numeroDirecto <> null then numeroDirecto else let t0 = if v=null then "" else Text.From(v), t = Text.Trim(Text.Replace(Text.Replace(t0, "#(00A0)", ""), " ", "")) in if t="" then null else let tryUS = try Number.FromText(t, "en-US"), valUS = if tryUS[HasError] then null else tryUS[Value] in if valUS<>null then valUS else let tryES = try Number.FromText(t, "es-ES"), valES = if tryES[HasError] then null else tryES[Value] in valES,
+
+    // ============================================================
+    // FUNCIÓN MÁGICA: PROCESAR DESCUENTOS
+    // ============================================================
+    FxProcesarDescuentos = (Binario as binary) =>
+        let
+            HtmlTexto = Text.FromBinary(Binario, 1252),
+            Columnas_HTML = List.Transform({1..15}, each {"Columna" & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}),
+            RawTable = Html.Table(HtmlTexto, Columnas_HTML, [RowSelector="tr"]),
+            
+            FilasLimpias = Table.SelectRows(RawTable, each [Columna1] <> "GRAN TOTAL" and [Columna1] <> "DESCUENTOS SALIDAS" and [Columna1] <> null),
+            FillContrato = Table.FillDown(Table.AddColumn(FilasLimpias, "ContratoInfo", each let txt = Text.Trim(Text.From([Columna1] ?? "")) in if Text.StartsWith(Text.Upper(txt), "CONTRATO") then txt else null), {"ContratoInfo"}),
+            AddOCContrato = Table.AddColumn(FillContrato, "# OC / Contrato", each let raw = Text.Select(Text.From([ContratoInfo] ?? ""), {"0".."9"}) in if raw = "" then null else raw, type text),
+            AddCodigoAct = Table.AddColumn(AddOCContrato, "Codigo act", each let txt = Text.Trim(Text.From([Columna3] ?? "")), baseCod = if Text.Contains(txt, " ") then Text.BeforeDelimiter(txt, " ") else txt in if baseCod = "" then null else FnFormatCodigoAct(baseCod), type text),
+            
+            AddValorDescuento = Table.AddColumn(AddCodigoAct, "Valor descuento", each let rawTxt = Text.Remove(Text.Trim(Text.From([Columna7] ?? "")), {"$", " "}) in FxToNumberFlex(rawTxt), Currency.Type),
+            
+            BaseFinal = Table.SelectColumns(Table.SelectRows(AddValorDescuento, each [#"# OC / Contrato"] <> null and [Codigo act] <> null and [Valor descuento] <> null and [Valor descuento] <> 0), {"# OC / Contrato", "Codigo act", "Valor descuento"})
+        in BaseFinal,
+
+    // ============================================================
+    // CONEXIÓN A SHAREPOINT
+    // ============================================================
+    RutaBase = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
+    ArchivosSharePoint = SharePoint.Files(RutaBase, [ApiVersion = 15]),
+    
+    ParamProyecto = Text.Trim(ProyectoActual),
+    ArchivosProyecto = Table.SelectRows(ArchivosSharePoint, each Text.Contains(Text.Upper([Folder Path]), "/" & Text.Upper(ParamProyecto) & "/") and Text.EndsWith([Folder Path], "/Actual/") and Text.Contains(Text.Upper([Name]), "DESCUENTOS") and not Text.StartsWith([Name], "~$")),
+    ConCentroCosto = Table.AddColumn(ArchivosProyecto, "Centro de Costos", each let pathTrimmed = Text.TrimEnd([Folder Path], "/"), segments = Text.Split(pathTrimmed, "/"), ccFolder = segments{List.Count(segments)-2} in Text.Trim(ccFolder)),
+    
+    // 🔥 EL SALVAVIDAS
+    Agrupado = Table.Group(ConCentroCosto, {"Centro de Costos"}, {{"Binario", each Binary.Buffer(_{0}[Content])}}),
+    TablaConDatos = Table.AddColumn(Agrupado, "Datos", each FxProcesarDescuentos([Binario])),
+    
+    SinBinario = Table.RemoveColumns(TablaConDatos, {"Binario"}),
+    Expandido = Table.ExpandTableColumn(SinBinario, "Datos", {"# OC / Contrato", "Codigo act", "Valor descuento"}),
+    
+    Descuentos_Clean = Table.TransformColumns(Expandido, {
+        {"Centro de Costos", each if _ = null then null else Text.Upper(Text.Trim(Text.From(_))), type text},
+        {"Codigo act", each FnFormatCodigoAct(_), type text},
+        {"# OC / Contrato", each if _ = null then null else Text.Trim(Text.From(_)), type text}
+    }, null, MissingField.Ignore),
+    
+    BaseDescuentos_EnMemoria = Table.Buffer(Descuentos_Clean),
+
+    // ============================================================
+    // LECTURA DIRECTA A EXCEL
+    // ============================================================
+    SourceContratos = try Excel.CurrentWorkbook(){[Name="CONTRATOS"]}[Content] otherwise CONTRATOS,
+    CONTRATOS_Clean = Table.TransformColumns(SourceContratos, {
+        {"# OC / Contrato", each if _ = null then null else Text.Trim(Text.From(_)), type text}
+    }, null, MissingField.Ignore),
+    ContratosPorOC = Table.Buffer(Table.Group(CONTRATOS_Clean, {"# OC / Contrato"}, {{"Nombre Contratista", each List.First([Nombre Contratista]), type text}, {"Descripcion contrato", each List.First([Descripcion contrato]), type text}})),
+
+    SourceItems = try Excel.CurrentWorkbook(){[Name="TbItems"]}[Content] otherwise ITEMSINSUMOS,
+    ITEMS_Clean = Table.TransformColumns(SourceItems, {
+        {"Codigo act", each FnFormatCodigoAct(_), type text}
+    }, null, MissingField.Ignore),
+    ItemsPorCodigo = Table.Buffer(Table.Group(ITEMS_Clean, {"Codigo act"}, {{"Actividad", each List.First([Actividad]), type text}, {"Capitulo", each List.First([Capitulo]), type text}, {"Subcapitulo", each List.First([Subcapitulo]), type text}})),
+
+    // ============================================================
+    // CRUCES FINALES Y SELECCIÓN ESTRICTA
+    // ============================================================
+    MergeContratos = Table.NestedJoin(BaseDescuentos_EnMemoria, {"# OC / Contrato"}, ContratosPorOC, {"# OC / Contrato"}, "C", JoinKind.LeftOuter),
+    ExpandContratos = Table.ExpandTableColumn(MergeContratos, "C", {"Nombre Contratista", "Descripcion contrato"}, {"Nombre Contratista", "Descripcion contrato"}),
+
+    MergeItems = Table.NestedJoin(ExpandContratos, {"Codigo act"}, ItemsPorCodigo, {"Codigo act"}, "I", JoinKind.LeftOuter),
+    ExpandItems = Table.ExpandTableColumn(MergeItems, "I", {"Actividad", "Capitulo", "Subcapitulo"}, {"Actividad", "Capitulo", "Subcapitulo"}),
+
+    AgregadoTipo = Table.AddColumn(ExpandItems, "Tipo", each "Descuento", type text),
+    
+    SelectedFinal = Table.SelectColumns(AgregadoTipo, {"Centro de Costos", "Codigo act", "Actividad", "Capitulo", "Subcapitulo", "# OC / Contrato", "Nombre Contratista", "Descripcion contrato", "Valor descuento", "Tipo"}),
+    TypedFinal = Table.TransformColumnTypes(SelectedFinal, {{"Centro de Costos", type text}, {"Codigo act", type text}, {"Actividad", type text}, {"Capitulo", type text}, {"Subcapitulo", type text}, {"# OC / Contrato", type text}, {"Nombre Contratista", type text}, {"Descripcion contrato", type text}, {"Valor descuento", Currency.Type}, {"Tipo", type text}}),
+    
+    FilteredZeros = Table.SelectRows(TypedFinal, each [Valor descuento] <> 0 and [Valor descuento] <> null),
+
+    TablaFinal = Table.Buffer(FilteredZeros)
+in
+    TablaFinal
