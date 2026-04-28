@@ -113,20 +113,17 @@ let
         in ITEMSINSUMOS_Final,
 
     // =========================================================
-    // EXTRACCIÓN MAESTRA: PPTO y APU al mismo tiempo (VERSIÓN RÁPIDA)
+    // EXTRACCIÓN MAESTRA: PPTO y APU al mismo tiempo (MODO SEGURO)
     // =========================================================
     RutaBase = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
-    Raiz = SharePoint.Contents(RutaBase, [ApiVersion = 15]),
-    CarpetaDocs = Raiz{[Name="Departamento Tecnico"]}[Content],
-    CarpetaCoord = CarpetaDocs{[Name="COORDINACION DE PRESUPUESTOS"]}[Content],
-    CarpetaReportes = CarpetaCoord{[Name="Reportes EDT"]}[Content],
-    CarpetaProyecto = CarpetaReportes{[Name=ParamProyecto]}[Content],
-    CentrosDeCosto = Table.SelectRows(CarpetaProyecto, each [Attributes]?[Kind]? = "Folder"),
-    AddCarpetaActual = Table.AddColumn(CentrosDeCosto, "ArchivosActual", each try [Content]{[Name="Actual"]}[Content] otherwise null),
-    ConCarpetaActual = Table.SelectRows(AddCarpetaActual, each [ArchivosActual] <> null),
-    ArchivosExpandidos = Table.ExpandTableColumn(ConCarpetaActual, "ArchivosActual", {"Name", "Content"}, {"FileName", "FileContent"}),
-    ArchivosProyecto = Table.Buffer(Table.SelectRows(ArchivosExpandidos, each not Text.StartsWith([FileName], "~$"))),
-    ConCentroCosto = Table.RenameColumns(ArchivosProyecto, {{"Name", "Centro de Costos"}, {"FileName", "Name"}, {"FileContent", "Content"}}),
+    ArchivosSharePoint = SharePoint.Files(RutaBase, [ApiVersion = 15]),
+    ParamProyecto = Text.Trim(ProyectoActual),
+    ArchivosProyecto = Table.Buffer(Table.SelectRows(ArchivosSharePoint, each 
+        Text.Contains(Text.Upper([Folder Path]), "/" & Text.Upper(ParamProyecto) & "/") and 
+        Text.EndsWith([Folder Path], "/Actual/") and 
+        not Text.StartsWith([Name], "~$")
+    )),
+    ConCentroCosto = Table.AddColumn(ArchivosProyecto, "Centro de Costos", each Text.Trim(Text.Replace(Text.AfterDelimiter([Folder Path], "/" & ParamProyecto & "/"), "/Actual/", ""))),
     
     Agrupado = Table.Group(ConCentroCosto, {"Centro de Costos"}, {{"Binarios", each let 
         // 🔥 Buscamos el APU para los nombres y el SEGUIMIENTO para la plata del presupuesto

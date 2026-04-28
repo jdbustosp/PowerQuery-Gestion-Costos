@@ -34,21 +34,18 @@ let
     in AddedNombreContratista,
 
     // ============================================================
-    // CONEXIÓN A SHAREPOINT (NUEVA VERSIÓN RÁPIDA)
+    // CONEXIÓN A SHAREPOINT (VERSIÓN FILES - MODO SEGURO)
     // ============================================================
     RutaBase = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
-    Raiz = SharePoint.Contents(RutaBase, [ApiVersion = 15]),
-    CarpetaDocs = Raiz{[Name="Departamento Tecnico"]}[Content],
-    CarpetaCoord = CarpetaDocs{[Name="COORDINACION DE PRESUPUESTOS"]}[Content],
-    CarpetaReportes = CarpetaCoord{[Name="Reportes EDT"]}[Content],
+    ArchivosSharePoint = SharePoint.Files(RutaBase, [ApiVersion = 15]),
     ParamProyecto = Text.Trim(ProyectoActual),
-    CarpetaProyecto = CarpetaReportes{[Name=ParamProyecto]}[Content],
-    CentrosDeCosto = Table.SelectRows(CarpetaProyecto, each [Attributes]?[Kind]? = "Folder"),
-    AddCarpetaActual = Table.AddColumn(CentrosDeCosto, "ArchivosActual", each try [Content]{[Name="Actual"]}[Content] otherwise null),
-    ConCarpetaActual = Table.SelectRows(AddCarpetaActual, each [ArchivosActual] <> null),
-    ArchivosExpandidos = Table.ExpandTableColumn(ConCarpetaActual, "ArchivosActual", {"Name", "Content"}, {"FileName", "FileContent"}),
-    ArchivosProyecto = Table.SelectRows(ArchivosExpandidos, each (Text.Contains(Text.Upper([FileName]), "INFORMEORDEN") or Text.Contains(Text.Upper([FileName]), "ESTADO DE ORDENES")) and not Text.StartsWith([FileName], "~$")),
-    ConCentroCosto = Table.RenameColumns(ArchivosProyecto, {{"Name", "Centro de Costos"}, {"FileName", "Name"}, {"FileContent", "Content"}}),
+    ArchivosProyecto = Table.SelectRows(ArchivosSharePoint, each 
+        Text.Contains(Text.Upper([Folder Path]), "/" & Text.Upper(ParamProyecto) & "/") and 
+        Text.EndsWith([Folder Path], "/Actual/") and 
+        (Text.Contains(Text.Upper([Name]), "INFORMEORDEN") or Text.Contains(Text.Upper([Name]), "ESTADO DE ORDENES")) and 
+        not Text.StartsWith([Name], "~$")
+    ),
+    ConCentroCosto = Table.AddColumn(ArchivosProyecto, "Centro de Costos", each Text.Trim(Text.Replace(Text.AfterDelimiter([Folder Path], "/" & ParamProyecto & "/"), "/Actual/", ""))),
     
     Agrupado = Table.Group(ConCentroCosto, {"Centro de Costos"}, {{"Binarios", each let FilaDet = Table.SelectRows(_, each Text.Contains(Text.Upper([Name]), "INFORMEORDEN")), FilaOC = Table.SelectRows(_, each Text.Contains(Text.Upper([Name]), "ESTADO DE ORDENES")) in if Table.RowCount(FilaDet) > 0 and Table.RowCount(FilaOC) > 0 then [Bin_Det = Binary.Buffer(FilaDet{0}[Content]), Bin_OC = Binary.Buffer(FilaOC{0}[Content])] else null}}),
     CentrosCompletos = Table.SelectRows(Agrupado, each [Binarios] <> null),
