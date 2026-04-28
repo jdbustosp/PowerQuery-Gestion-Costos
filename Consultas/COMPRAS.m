@@ -39,9 +39,9 @@ let
     RutaBase = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
     ArchivosSharePoint = SharePoint.Files(RutaBase, [ApiVersion = 15]),
     ArchivosProyecto = Table.SelectRows(ArchivosSharePoint, each 
-        Text.Contains(Text.Upper([Folder Path]), "/" & Text.Upper(ParamProyecto) & "/") and 
-        Text.EndsWith([Folder Path], "/Actual/") and 
-        (Text.Contains(Text.Upper([Name]), "INFORMEORDEN") or Text.Contains(Text.Upper([Name]), "ESTADO DE ORDENES")) and 
+        Text.Contains([Folder Path], "/" & ParamProyecto & "/", Comparer.OrdinalIgnoreCase) and 
+        Text.EndsWith([Folder Path], "/Actual/", Comparer.OrdinalIgnoreCase) and 
+        (Text.Contains([Name], "INFORMEORDEN", Comparer.OrdinalIgnoreCase) or Text.Contains([Name], "ESTADO DE ORDENES", Comparer.OrdinalIgnoreCase)) and 
         not Text.StartsWith([Name], "~$")
     ),
     ConCentroCosto = Table.AddColumn(ArchivosProyecto, "Centro de Costos", each Text.Trim(Text.Replace(Text.AfterDelimiter([Folder Path], "/" & ParamProyecto & "/"), "/Actual/", ""))),
