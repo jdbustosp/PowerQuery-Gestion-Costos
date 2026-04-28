@@ -13,9 +13,9 @@ let
     // ============================================================
     FxProcesarCortes = (BinarioCortes as binary) =>
         let
-            // Uso de Windows-1252 para mitigar símbolos raros desde el origen
-            TextoHTML = Text.FromBinary(Binary.Buffer(BinarioCortes), 1252), 
-            Source = Html.Table(TextoHTML, Columnas_HTML, [RowSelector="tr"]), 
+            // 🚀 Excel.Workbook es más rápido que Html.Table
+            Source = try Excel.Workbook(BinarioCortes, null, true){0}[Data]
+                     otherwise Html.Table(Text.FromBinary(BinarioCortes, 1252), Columnas_HTML, [RowSelector="tr"]), 
             AddFilaTexto = Table.AddColumn(Source, "FilaTexto", each let vals = Record.FieldValues(_), soloTexto = List.Transform(List.Select(vals, each _ <> null and _ <> ""), Text.From) in Text.Trim(Text.Combine(soloTexto, " ")), type text),
             AddOC = Table.AddColumn(AddFilaTexto, "# OC / Contrato", each let txt = [FilaTexto] in if txt <> null and Text.Contains(Text.Upper(txt), "CONTRATO NO") then let after = Text.TrimStart(Text.Replace(Text.Range(txt, Text.PositionOf(Text.Upper(txt), "CONTRATO NO") + 11), "#(00A0)", " "), {".", ":", " "}), first = Text.BeforeDelimiter(after, " "), num = Text.Select(if first = "" then after else first, {"0".."9"}) in if num = "" then null else num else null, type text),
             AddDesc = Table.AddColumn(AddOC, "Descripcion contrato", each let txt = [FilaTexto] in if txt <> null and Text.Contains(Text.Upper(txt), "CONTRATO NO") then let after = Text.TrimStart(Text.Range(txt, Text.PositionOf(Text.Upper(txt), "CONTRATO NO") + 11), {".", ":", " "}), idx = Text.PositionOfAny(after, {"A".."Z","a".."z"}), desc = if idx = -1 then null else Text.Range(after, idx), lim = if desc = null then null else if Text.Contains(Text.Upper(desc), "CONTRATISTA") then Text.BeforeDelimiter(Text.Upper(desc), "CONTRATISTA") else desc in if lim = null then null else Text.Trim(lim) else null, type text),

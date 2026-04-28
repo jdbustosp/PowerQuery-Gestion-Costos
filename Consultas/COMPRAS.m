@@ -15,8 +15,9 @@ let
     // FUNCIÓN MÁGICA: PROCESAR COMPRAS
     // ============================================================
     FxProcesarCompras = (BinDetalles as binary, BinOC as binary) => let
-        HtmlOC = Text.FromBinary(Binary.Buffer(BinOC), 65001),
-        RawOC = Html.Table(HtmlOC, Columnas_OC, [RowSelector="tr"]),
+        // 🚀 Excel.Workbook es más rápido que Html.Table
+        RawOC = try Excel.Workbook(BinOC, null, true){0}[Data]
+                otherwise Html.Table(Text.FromBinary(Binary.Buffer(BinOC), 65001), Columnas_OC, [RowSelector="tr"]),
         AddOCKey = Table.AddColumn(RawOC, "OC_Key_Temp", each let v = Text.From([Columna1] ?? "") in if Text.StartsWith(v, "Orden de Compra No.") then Text.Trim(Text.Replace(v, "Orden de Compra No.", "")) else null, type text),
         Ordenes_Agrupadas = Table.RenameColumns(Table.Group(Table.SelectRows(Table.FillDown(AddOCKey, {"OC_Key_Temp"}), each [OC_Key_Temp] <> null), {"OC_Key_Temp"}, {{"Proveedor_Raw", each let l = List.RemoveNulls([Columna2]), l2 = List.Select(l, (x) => let t = Text.Trim(Text.From(x ?? "")) in t <> "Proveedor" and t <> "Insumo") in if List.IsEmpty(l2) then null else List.First(l2), type text}}), {{"OC_Key_Temp", "OC_Key"}}),
 

@@ -14,8 +14,9 @@ let
     // =========================================================
     FxProcesarCentroCosto = (BinarioSeguimiento as binary, BinarioPresupuesto as binary) =>
         let
-            HtmlSeguimiento  = Text.FromBinary(BinarioSeguimiento, 65001),
-            OrigenItems      = Html.Table(HtmlSeguimiento, Columnas_HTML, [RowSelector="tr"]),
+            // 🚀 Excel.Workbook es 3-5x más rápido que Html.Table
+            OrigenItems = try Excel.Workbook(BinarioSeguimiento, null, true){0}[Data]
+                          otherwise Html.Table(Text.FromBinary(BinarioSeguimiento, 65001), Columnas_HTML, [RowSelector="tr"]),
             ItemsPrepared    = FnPrepareTableWithHeader(OrigenItems),
 
             ItemsColNames    = Table.ColumnNames(ItemsPrepared),
@@ -55,11 +56,11 @@ let
             ItemsWithCodigoIns = Table.AddColumn(A6, "Codigo ins", each Text.From(Record.Field(_, ItemsCodColName)), type text),
             ItemsWithIns = Table.AddColumn(ItemsWithCodigoIns, "Ins", (r as record) => let descIns = Record.Field(r, ItemsDescColName), umIns = Record.Field(r, ItemsUMColName), dTxt0 = if descIns = null then "" else Text.Trim(Text.From(descIns)), umTxt = if umIns = null then "" else Text.Trim(Text.From(umIns)), baseTxt = if umTxt = "" then dTxt0 else dTxt0 & " (" & umTxt & ")", clean = FnRemoveAccentsSymbols(baseTxt) in clean, type text),
 
-            // 🔥 PARSEO APU (UNA SOLA VEZ)
-            HtmlAPU  = Text.FromBinary(BinarioPresupuesto, 65001),
-            // Solo necesitamos 3 columnas del APU
-            Columnas_APU = List.Transform({1..3}, each {"Columna " & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}),
-            OrigenAPU = Html.Table(HtmlAPU, Columnas_APU, [RowSelector="tr"]),
+            // 🚀 PARSEO APU - Excel.Workbook (más rápido)
+            OrigenAPU_Raw = try Excel.Workbook(BinarioPresupuesto, null, true){0}[Data]
+                            otherwise Html.Table(Text.FromBinary(BinarioPresupuesto, 65001), 
+                                List.Transform({1..3}, each {"Columna " & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}), [RowSelector="tr"]),
+            OrigenAPU = Table.SelectColumns(OrigenAPU_Raw, List.FirstN(Table.ColumnNames(OrigenAPU_Raw), 3)),
             
             APU_Paso1 = Table.AddColumn(OrigenAPU, "Cod_Temp", each 
                 let 
