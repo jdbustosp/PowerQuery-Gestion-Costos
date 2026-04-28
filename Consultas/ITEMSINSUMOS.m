@@ -19,8 +19,8 @@ let
     FxProcesarCentroCosto = (BinarioSeguimiento as binary, BinarioPresupuesto as binary) =>
         let
             // 🔥 LECTURA FORZADA EN UTF-8 (65001) PARA LAS "Ñ" y TILDES
-            HtmlSeguimiento  = Text.FromBinary(Binary.Buffer(BinarioSeguimiento), 65001),
-            OrigenItems      = Table.Buffer(Html.Table(HtmlSeguimiento, Columnas_HTML, [RowSelector="tr"])),
+            HtmlSeguimiento  = Text.FromBinary(BinarioSeguimiento, 65001),
+            OrigenItems      = Html.Table(HtmlSeguimiento, Columnas_HTML, [RowSelector="tr"]),
             ItemsPrepared    = FnPrepareTableWithHeader(OrigenItems),
 
             ItemsColNames    = Table.ColumnNames(ItemsPrepared),
@@ -48,7 +48,7 @@ let
             ItemsWithIns = Table.AddColumn(ItemsWithCodigoIns, "Ins", (r as record) => let descIns = Record.Field(r, ItemsDescColName), umIns = Record.Field(r, ItemsUMColName), dTxt0 = if descIns = null then "" else Text.Trim(Text.From(descIns)), umTxt = if umIns  = null then "" else Text.Trim(Text.From(umIns)), baseTxt = if umTxt = "" then dTxt0 else dTxt0 & " (" & umTxt & ")", clean = FnRemoveAccentsSymbols(baseTxt) in clean, type text),
 
             // 🔥 LECTURA FORZADA EN UTF-8 (65001) - NUEVO DICCIONARIO APU
-            HtmlAPU  = Text.FromBinary(Binary.Buffer(BinarioPresupuesto), 65001),
+            HtmlAPU  = Text.FromBinary(BinarioPresupuesto, 65001),
             OrigenAPU = Html.Table(HtmlAPU, Columnas_HTML, [RowSelector="tr"]),
             
             APU_Paso1 = Table.AddColumn(OrigenAPU, "Cod_Temp", each 
@@ -99,16 +99,9 @@ let
         in ITEMSINSUMOS_Final,
 
     // =========================================================
-    // EXTRACCIÓN MAESTRA (VERSIÓN FILES - MODO SEGURO)
+    // EXTRACCIÓN MAESTRA (LECTURA DESDE CONSULTA COMPARTIDA)
     // =========================================================
-    RutaBase = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv", 
-    ArchivosSharePoint = SharePoint.Files(RutaBase, [ApiVersion = 15]),
-    ArchivosProyecto = Table.Buffer(Table.SelectRows(ArchivosSharePoint, each 
-        Text.Contains([Folder Path], "/" & ParamProyecto & "/", Comparer.OrdinalIgnoreCase) and 
-        Text.EndsWith([Folder Path], "/Actual/", Comparer.OrdinalIgnoreCase) and 
-        not Text.StartsWith([Name], "~$")
-    )),
-    ConCentroCosto = Table.AddColumn(ArchivosProyecto, "Centro de Costos", each Text.Trim(Text.Replace(Text.AfterDelimiter([Folder Path], "/" & ParamProyecto & "/"), "/Actual/", ""))),
+    ConCentroCosto = SP_Archivos_Proyecto,
     Agrupado = Table.Group(ConCentroCosto, {"Centro de Costos"}, {{"Binarios", each let FilaPres = Table.SelectRows(_, each Text.Contains(Text.Upper([Name]), "ANALISIS DE PRECIOS UNITARIOS")), FilaSeg = Table.SelectRows(_, each Text.Contains(Text.Upper([Name]), "SEGUIMIENTO POR ITEMS")) in if Table.RowCount(FilaPres) > 0 and Table.RowCount(FilaSeg) > 0 then [Bin_P = FilaPres{0}[Content], Bin_S = FilaSeg{0}[Content]] else null}}),
     CentrosCompletos = Table.SelectRows(Agrupado, each [Binarios] <> null),
     TablaConDatos = Table.AddColumn(CentrosCompletos, "Datos", each FxProcesarCentroCosto([Binarios][Bin_S], [Binarios][Bin_P])),

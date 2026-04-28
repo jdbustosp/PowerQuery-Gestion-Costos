@@ -34,17 +34,13 @@ let
     in AddedNombreContratista,
 
     // ============================================================
-    // CONEXIÓN A SHAREPOINT (VERSIÓN FILES - MODO SEGURO)
+    // CONEXIÓN A SHAREPOINT (LECTURA DESDE CONSULTA COMPARTIDA)
     // ============================================================
-    RutaBase = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
-    ArchivosSharePoint = SharePoint.Files(RutaBase, [ApiVersion = 15]),
-    ArchivosProyecto = Table.SelectRows(ArchivosSharePoint, each 
-        Text.Contains([Folder Path], "/" & ParamProyecto & "/", Comparer.OrdinalIgnoreCase) and 
-        Text.EndsWith([Folder Path], "/Actual/", Comparer.OrdinalIgnoreCase) and 
-        (Text.Contains([Name], "INFORMEORDEN", Comparer.OrdinalIgnoreCase) or Text.Contains([Name], "ESTADO DE ORDENES", Comparer.OrdinalIgnoreCase)) and 
-        not Text.StartsWith([Name], "~$")
+    ArchivosProyecto = Table.SelectRows(SP_Archivos_Proyecto, each 
+        Text.Contains([Name], "INFORMEORDEN", Comparer.OrdinalIgnoreCase) or 
+        Text.Contains([Name], "ESTADO DE ORDENES", Comparer.OrdinalIgnoreCase)
     ),
-    ConCentroCosto = Table.AddColumn(ArchivosProyecto, "Centro de Costos", each Text.Trim(Text.Replace(Text.AfterDelimiter([Folder Path], "/" & ParamProyecto & "/"), "/Actual/", ""))),
+    ConCentroCosto = ArchivosProyecto,
     
     Agrupado = Table.Group(ConCentroCosto, {"Centro de Costos"}, {{"Binarios", each let FilaDet = Table.SelectRows(_, each Text.Contains(Text.Upper([Name]), "INFORMEORDEN")), FilaOC = Table.SelectRows(_, each Text.Contains(Text.Upper([Name]), "ESTADO DE ORDENES")) in if Table.RowCount(FilaDet) > 0 and Table.RowCount(FilaOC) > 0 then [Bin_Det = Binary.Buffer(FilaDet{0}[Content]), Bin_OC = Binary.Buffer(FilaOC{0}[Content])] else null}}),
     CentrosCompletos = Table.SelectRows(Agrupado, each [Binarios] <> null),

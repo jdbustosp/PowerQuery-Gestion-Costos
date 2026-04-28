@@ -25,14 +25,12 @@ let
         in BaseFinal,
 
     // ============================================================
-    // CONEXIÓN A SHAREPOINT
+    // CONEXIÓN A SHAREPOINT (LECTURA DESDE CONSULTA COMPARTIDA)
     // ============================================================
-    RutaBase = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
-    ArchivosSharePoint = SharePoint.Files(RutaBase, [ApiVersion = 15]),
-    
-    ParamProyecto = Text.Trim(ProyectoActual),
-    ArchivosProyecto = Table.SelectRows(ArchivosSharePoint, each Text.Contains(Text.Upper([Folder Path]), "/" & Text.Upper(ParamProyecto) & "/") and Text.EndsWith([Folder Path], "/Actual/") and Text.Contains(Text.Upper([Name]), "DESCUENTOS") and not Text.StartsWith([Name], "~$")),
-    ConCentroCosto = Table.AddColumn(ArchivosProyecto, "Centro de Costos", each let pathTrimmed = Text.TrimEnd([Folder Path], "/"), segments = Text.Split(pathTrimmed, "/"), ccFolder = segments{List.Count(segments)-2} in Text.Trim(ccFolder)),
+    ArchivosProyecto = Table.SelectRows(SP_Archivos_Proyecto, each 
+        Text.Contains([Name], "DESCUENTOS", Comparer.OrdinalIgnoreCase)
+    ),
+    ConCentroCosto = ArchivosProyecto,
     
     // 🔥 EL SALVAVIDAS
     Agrupado = Table.Group(ConCentroCosto, {"Centro de Costos"}, {{"Binario", each Binary.Buffer(_{0}[Content])}}),
@@ -47,7 +45,7 @@ let
         {"# OC / Contrato", each if _ = null then null else Text.Trim(Text.From(_)), type text}
     }, null, MissingField.Ignore),
     
-    BaseDescuentos_EnMemoria = Table.Buffer(Descuentos_Clean),
+    BaseDescuentos_EnMemoria = Descuentos_Clean,
 
     // ============================================================
     // LECTURA DIRECTA DE CONSULTAS (Memoria)
@@ -56,7 +54,7 @@ let
     CONTRATOS_Clean = Table.TransformColumns(SourceContratos, {
         {"# OC / Contrato", each if _ = null then null else Text.Trim(Text.From(_)), type text}
     }, null, MissingField.Ignore),
-    ContratosPorOC = Table.Buffer(Table.Group(CONTRATOS_Clean, {"# OC / Contrato"}, {{"Nombre Contratista", each List.First([Nombre Contratista]), type text}, {"Descripcion contrato", each List.First([Descripcion contrato]), type text}})),
+    ContratosPorOC = Table.Group(CONTRATOS_Clean, {"# OC / Contrato"}, {{"Nombre Contratista", each List.First([Nombre Contratista]), type text}, {"Descripcion contrato", each List.First([Descripcion contrato]), type text}}),
 
     SourceItems = ITEMSINSUMOS,
     ITEMS_Clean = Table.TransformColumns(SourceItems, {

@@ -43,17 +43,12 @@ let
         in AddClave, 
 
     // ============================================================
-    // CONEXIÓN A SHAREPOINT (VERSIÓN FILES - MODO SEGURO)
+    // CONEXIÓN A SHAREPOINT (LECTURA DESDE CONSULTA COMPARTIDA)
     // ============================================================
-    RutaBase = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
-    ArchivosSharePoint = SharePoint.Files(RutaBase, [ApiVersion = 15]),
-    ArchivosProyecto = Table.SelectRows(ArchivosSharePoint, each 
-        Text.Contains([Folder Path], "/" & ParamProyecto & "/", Comparer.OrdinalIgnoreCase) and 
-        Text.EndsWith([Folder Path], "/Actual/", Comparer.OrdinalIgnoreCase) and 
-        Text.Contains([Name], "ESTADO DE CONTRATOS", Comparer.OrdinalIgnoreCase) and 
-        not Text.StartsWith([Name], "~$")
+    ArchivosProyecto = Table.SelectRows(SP_Archivos_Proyecto, each 
+        Text.Contains([Name], "ESTADO DE CONTRATOS", Comparer.OrdinalIgnoreCase)
     ),
-    ConCentroCosto = Table.AddColumn(ArchivosProyecto, "Centro de Costos", each Text.Trim(Text.Replace(Text.AfterDelimiter([Folder Path], "/" & ParamProyecto & "/"), "/Actual/", ""))),
+    ConCentroCosto = ArchivosProyecto,
     
     TablaConDatos = Table.AddColumn(ConCentroCosto, "Datos", each FxProcesarCortes([Content])),
     SoloDatos = Table.SelectColumns(TablaConDatos, {"Centro de Costos", "Datos"}),

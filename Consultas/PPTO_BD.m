@@ -113,16 +113,9 @@ let
         in ITEMSINSUMOS_Final,
 
     // =========================================================
-    // EXTRACCIÓN MAESTRA: PPTO y APU al mismo tiempo (MODO SEGURO)
+    // EXTRACCIÓN MAESTRA (LECTURA DESDE CONSULTA COMPARTIDA)
     // =========================================================
-    RutaBase = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
-    ArchivosSharePoint = SharePoint.Files(RutaBase, [ApiVersion = 15]),
-    ArchivosProyecto = Table.Buffer(Table.SelectRows(ArchivosSharePoint, each 
-        Text.Contains([Folder Path], "/" & ParamProyecto & "/", Comparer.OrdinalIgnoreCase) and 
-        Text.EndsWith([Folder Path], "/Actual/", Comparer.OrdinalIgnoreCase) and 
-        not Text.StartsWith([Name], "~$")
-    )),
-    ConCentroCosto = Table.AddColumn(ArchivosProyecto, "Centro de Costos", each Text.Trim(Text.Replace(Text.AfterDelimiter([Folder Path], "/" & ParamProyecto & "/"), "/Actual/", ""))),
+    ConCentroCosto = SP_Archivos_Proyecto,
     
     Agrupado = Table.Group(ConCentroCosto, {"Centro de Costos"}, {{"Binarios", each let 
         // 🔥 Buscamos el APU para los nombres y el SEGUIMIENTO para la plata del presupuesto
