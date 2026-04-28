@@ -113,18 +113,18 @@ let
         in ITEMSINSUMOS_Final,
 
     // =========================================================
-    // EXTRACCIÓN MAESTRA
+    // EXTRACCIÓN MAESTRA: PPTO y APU al mismo tiempo (VERSIÓN RÁPIDA)
     // =========================================================
-    RutaBase = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv", 
-    ArchivosSharePoint = SharePoint.Files(RutaBase, [ApiVersion = 15]),
-    
-    ArchivosProyecto = Table.SelectRows(ArchivosSharePoint, each 
-        Text.Contains(Text.Upper([Folder Path]), "/" & Text.Upper(ParamProyecto) & "/") and 
-        Text.EndsWith([Folder Path], "/Actual/") and 
-        not Text.StartsWith([Name], "~$")
-    ),
-    
-    ConCentroCosto = Table.AddColumn(ArchivosProyecto, "Centro de Costos", each Text.Trim(Text.Replace(Text.AfterDelimiter([Folder Path], "/" & ParamProyecto & "/"), "/Actual/", ""))),
+    RutaBase = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
+    Raiz = SharePoint.Contents(RutaBase, [ApiVersion = 15]),
+    CarpetaDocs = try Raiz{[Name="Documentos Compartidos"]}[Content] otherwise Raiz{[Name="Documentos"]}[Content],
+    CarpetaProyecto = CarpetaDocs{[Name=ParamProyecto]}[Content],
+    CentrosDeCosto = Table.SelectRows(CarpetaProyecto, each [Attributes]?[Kind]? = "Folder"),
+    AddCarpetaActual = Table.AddColumn(CentrosDeCosto, "ArchivosActual", each try [Content]{[Name="Actual"]}[Content] otherwise null),
+    ConCarpetaActual = Table.SelectRows(AddCarpetaActual, each [ArchivosActual] <> null),
+    ArchivosExpandidos = Table.ExpandTableColumn(ConCarpetaActual, "ArchivosActual", {"Name", "Content"}, {"FileName", "FileContent"}),
+    ArchivosProyecto = Table.Buffer(Table.SelectRows(ArchivosExpandidos, each not Text.StartsWith([FileName], "~$"))),
+    ConCentroCosto = Table.RenameColumns(ArchivosProyecto, {{"Name", "Centro de Costos"}, {"FileName", "Name"}, {"FileContent", "Content"}}),
     
     Agrupado = Table.Group(ConCentroCosto, {"Centro de Costos"}, {{"Binarios", each let 
         // 🔥 Buscamos el APU para los nombres y el SEGUIMIENTO para la plata del presupuesto

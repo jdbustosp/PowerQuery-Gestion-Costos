@@ -43,21 +43,25 @@ let
         in AddClave, 
 
     // ============================================================
-    // 3. CONEXIÓN A SHAREPOINT
+    // CONEXIÓN A SHAREPOINT (NUEVA VERSIÓN RÁPIDA)
     // ============================================================
     RutaBase = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
-    ArchivosSharePoint = SharePoint.Files(RutaBase, [ApiVersion = 15]),
+    Raiz = SharePoint.Contents(RutaBase, [ApiVersion = 15]),
+    CarpetaDocs = try Raiz{[Name="Documentos Compartidos"]}[Content] otherwise Raiz{[Name="Documentos"]}[Content],
+    ParamProyecto = Text.Trim(ProyectoActual),
+    CarpetaProyecto = CarpetaDocs{[Name=ParamProyecto]}[Content],
+    CentrosDeCosto = Table.SelectRows(CarpetaProyecto, each [Attributes]?[Kind]? = "Folder"),
+    AddCarpetaActual = Table.AddColumn(CentrosDeCosto, "ArchivosActual", each try [Content]{[Name="Actual"]}[Content] otherwise null),
+    ConCarpetaActual = Table.SelectRows(AddCarpetaActual, each [ArchivosActual] <> null),
+    ArchivosExpandidos = Table.ExpandTableColumn(ConCarpetaActual, "ArchivosActual", {"Name", "Content", "Date modified"}, {"FileName", "FileContent", "Date modified"}),
     
-    ParamProyectoLimpio = Text.Upper(Text.Trim(ProyectoActual)),
-
-    ArchivosProyecto = Table.SelectRows(ArchivosSharePoint, each 
-        Text.Contains(Text.Upper([Folder Path]), ParamProyectoLimpio) and 
-        Text.Contains(Text.Upper([Folder Path]), "ACTUAL") and 
-        (Text.Contains(Text.Upper([Name]), "ESTADO DE CONTRATOS") or Text.Contains(Text.Upper([Name]), "CONTRATO")) and 
-        not Text.StartsWith([Name], "~$")
+    // 🔥 EL NÚCLEO DEL FILTRO: Buscar estrictamente "ESTADO DE CONTRATOS"
+    ArchivosProyecto = Table.SelectRows(ArchivosExpandidos, each 
+        Text.Contains(Text.Upper([FileName]), "ESTADO DE CONTRATOS")
+        and not Text.StartsWith([FileName], "~$")
     ),
     
-    ConCentroCosto = Table.AddColumn(ArchivosProyecto, "Centro de Costos", each let pathTrimmed = Text.TrimEnd([Folder Path], "/"), segments = Text.Split(pathTrimmed, "/"), ccFolder = segments{List.Count(segments)-2} in Text.Trim(ccFolder)),
+    ConCentroCosto = Table.RenameColumns(ArchivosProyecto, {{"Name", "Centro de Costos"}, {"FileName", "Name"}, {"FileContent", "Content"}}),
     
     TablaConDatos = Table.AddColumn(ConCentroCosto, "Datos", each FxProcesarCortes([Content])),
     SoloDatos = Table.SelectColumns(TablaConDatos, {"Centro de Costos", "Datos"}),

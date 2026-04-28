@@ -47,37 +47,71 @@ let
             ItemsWithCodigoIns = Table.AddColumn(ItemsAddVTCons, "Codigo ins", each Text.From(Record.Field(_, ItemsCodColName)), type text),
             ItemsWithIns = Table.AddColumn(ItemsWithCodigoIns, "Ins", (r as record) => let descIns = Record.Field(r, ItemsDescColName), umIns = Record.Field(r, ItemsUMColName), dTxt0 = if descIns = null then "" else Text.Trim(Text.From(descIns)), umTxt = if umIns  = null then "" else Text.Trim(Text.From(umIns)), baseTxt = if umTxt = "" then dTxt0 else dTxt0 & " (" & umTxt & ")", clean = FnRemoveAccentsSymbols(baseTxt) in clean, type text),
 
-            // 🔥 LECTURA FORZADA EN UTF-8 (65001)
-            HtmlPresupuesto  = Text.FromBinary(Binary.Buffer(BinarioPresupuesto), 65001),
-            OrigenSeg        = Table.Buffer(Html.Table(HtmlPresupuesto, Columnas_HTML, [RowSelector="tr"])),
-            SegPrepared      = FnPrepareTableWithHeader(OrigenSeg),
-            SegCols          = Table.ColumnNames(SegPrepared),
-            SegCodCol = if List.Count(List.Select(SegCols, (c) => Text.Contains(Text.Replace(Text.Upper(c), "Ó", "O"), "COD"))) > 0 then List.Select(SegCols, (c) => Text.Contains(Text.Replace(Text.Upper(c), "Ó", "O"), "COD")){0} else SegCols{0},
-            SegItemCol = if List.Count(List.Select(SegCols, (c) => Text.Contains(Text.Upper(c), "ITEM"))) > 0 then List.Select(SegCols, (c) => Text.Contains(Text.Upper(c), "ITEM")){0} else if List.Count(SegCols) > 2 then SegCols{2} else SegCols{1},
-            SegUMCol = if List.Count(List.Select(SegCols, (c) => Text.Contains(Text.Upper(c), "UM"))) > 0 then List.Select(SegCols, (c) => Text.Contains(Text.Upper(c), "UM")){0} else if List.Count(SegCols) > 3 then SegCols{3} else SegCols{1},
+            // 🔥 LECTURA FORZADA EN UTF-8 (65001) - NUEVO DICCIONARIO APU
+            HtmlAPU  = Text.FromBinary(Binary.Buffer(BinarioPresupuesto), 65001),
+            OrigenAPU = Html.Table(HtmlAPU, Columnas_HTML, [RowSelector="tr"]),
+            
+            APU_Paso1 = Table.AddColumn(OrigenAPU, "Cod_Temp", each 
+                let 
+                    c1 = Text.Trim(Text.From([#"Columna 1"] ?? "")),
+                    hasDash = Text.Contains(c1, "-"),
+                    preDash = if hasDash then Text.Trim(Text.BeforeDelimiter(c1, "-")) else "",
+                    esNum = try Number.FromText(preDash) otherwise null
+                in if hasDash and esNum <> null then FnFormatCodigoAct(preDash) else null
+            ),
+            
+            APU_Paso2 = Table.SelectRows(APU_Paso1, each [Cod_Temp] <> null),
+            
+            APU_Diccionario = Table.AddColumn(APU_Paso2, "NombreActAPU", each 
+                let 
+                    rawName = Text.AfterDelimiter(Text.From([#"Columna 1"] ?? ""), "-"),
+                    cleanName = Text.Trim(Text.Replace(Text.Replace(Text.Replace(rawName, "#(lf)", " "), "#(cr)", " "), "#(00A0)", " "))
+                in cleanName, type text
+            ),
+            
+            APU_DiccionarioLimpio = Table.SelectColumns(APU_Diccionario, {"Cod_Temp", "NombreActAPU", "Columna 3"}),
+            APU_DiccionarioRenombrado = Table.RenameColumns(APU_DiccionarioLimpio, {{"Cod_Temp", "CodigoActAPU"}, {"Columna 3", "UM_Actividad"}}),
+            DiccionarioAPU_Unico = Table.Distinct(APU_DiccionarioRenombrado, {"CodigoActAPU"}),
 
-            SegWithTipoFila = Table.AddColumn(SegPrepared, "TipoFilaSeg", (r as record) => let codText = Text.Trim(Text.From(Record.Field(r, SegCodCol) ?? "")), tryNum = try Number.FromText(codText) in if not tryNum[HasError] then "Actividad" else "Otro", type text),
-            SegSoloActividades = Table.SelectRows(SegWithTipoFila, each [TipoFilaSeg] = "Actividad"),
-            SegWithCodigoAct = Table.AddColumn(SegSoloActividades, "Codigo act", each FnFormatCodigoAct(Record.Field(_, SegCodCol)), type text),
-            SegWithActividad = Table.AddColumn(SegWithCodigoAct, "Actividad", (r as record) => let itemTxt = Text.Trim(Text.From(Record.Field(r, SegItemCol) ?? "")), umTxt = Text.Trim(Text.From(Record.Field(r, SegUMCol) ?? "")), codTxt = Text.Trim(Text.From(Record.Field(r, "Codigo act") ?? "")), baseTxt = if umTxt = "" then itemTxt else itemTxt & " (" & umTxt & ")", actTxt = if codTxt = "" then baseTxt else codTxt & "-" & baseTxt in FnRemoveAccentsSymbols(actTxt), type text),
+            // CRUCE CONTRA SEGUIMIENTO
+            ItemsJoinAPU = Table.NestedJoin(ItemsWithIns, {"Codigo act"}, DiccionarioAPU_Unico, {"CodigoActAPU"}, "APU", JoinKind.LeftOuter),
+            ItemsExpandedAPU = Table.ExpandTableColumn(ItemsJoinAPU, "APU", {"NombreActAPU", "UM_Actividad"}, {"NombreActAPU", "UM_Actividad"}),
 
-            SegForJoinRaw = Table.SelectColumns(SegWithActividad, {"Codigo act", "Actividad"}),
-            SegForJoin    = Table.Distinct(SegForJoinRaw, {"Codigo act"}),
-
-            ItemsJoinSeg = Table.NestedJoin(ItemsWithIns, {"Codigo act"}, SegForJoin, {"Codigo act"}, "Seg", JoinKind.LeftOuter),
-            ItemsExpandedSeg = Table.ExpandTableColumn(ItemsJoinSeg, "Seg", {"Actividad"}, {"Actividad"}),
+            // 🔥 Creamos el nombre oficial de la Actividad (Código - Nombre (UM))
+            ItemsExpandedSeg = Table.AddColumn(ItemsExpandedAPU, "Actividad", each 
+                let 
+                    codTxt = [Codigo act] ?? "",
+                    nombreExtraido = Text.Trim(Text.From([NombreActAPU] ?? "")),
+                    nombreReal = if nombreExtraido = "" then "Actividad " & codTxt else nombreExtraido,
+                    
+                    subcapTxt = Text.Trim(Text.From([Subcapitulo] ?? "")),
+                    nombreSinSubcap = if subcapTxt <> "" then Text.Replace(nombreReal, subcapTxt, "") else nombreReal,
+                    
+                    umTxt = Text.Trim(Text.From([UM_Actividad] ?? "")),
+                    
+                    nombreLimpio = Text.Combine(List.Select(Text.Split(nombreSinSubcap, " "), each _ <> ""), " "),
+                    actTxt = if umTxt = "" then codTxt & "-" & nombreLimpio else codTxt & "-" & nombreLimpio & " (" & umTxt & ")"
+                in FnRemoveAccentsSymbols(actTxt), type text
+            ),
 
             ItemsNumsTyped = Table.TransformColumns(ItemsExpandedSeg, {{"Cantidad Proyectado", each FnParseNumber(_), type number}, {"VT Proyectado", each FnParseNumber(_), Currency.Type}, {"Cantidad Consumido", each FnParseNumber(_), type number}, {"VT Consumido", each FnParseNumber(_), Currency.Type}}),
             ITEMSINSUMOS_Final = Table.SelectColumns(ItemsNumsTyped, {"Codigo ins", "Ins", "Codigo act", "Actividad", "Capitulo", "Subcapitulo", "Cantidad Proyectado", "VT Proyectado", "Cantidad Consumido", "VT Consumido"})
         in ITEMSINSUMOS_Final,
 
     // =========================================================
-    // EXTRACCIÓN MAESTRA
+    // EXTRACCIÓN MAESTRA (VERSIÓN RÁPIDA)
     // =========================================================
-    RutaBase = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv", ArchivosSharePoint = SharePoint.Files(RutaBase, [ApiVersion = 15]),
-    ArchivosProyecto = Table.Buffer(Table.SelectRows(ArchivosSharePoint, each Text.Contains(Text.Upper([Folder Path]), "/" & Text.Upper(ParamProyecto) & "/") and Text.EndsWith([Folder Path], "/Actual/"))),
-    ConCentroCosto = Table.AddColumn(ArchivosProyecto, "Centro de Costos", each Text.Trim(Text.Replace(Text.AfterDelimiter([Folder Path], "/" & ParamProyecto & "/"), "/Actual/", ""))),
-    Agrupado = Table.Group(ConCentroCosto, {"Centro de Costos"}, {{"Binarios", each let FilaPres = Table.SelectRows(_, each Text.Contains(Text.Upper([Name]), "PRESUPUESTO ITEMS")), FilaSeg = Table.SelectRows(_, each Text.Contains(Text.Upper([Name]), "SEGUIMIENTO POR ITEMS")) in if Table.RowCount(FilaPres) > 0 and Table.RowCount(FilaSeg) > 0 then [Bin_P = FilaPres{0}[Content], Bin_S = FilaSeg{0}[Content]] else null}}),
+    RutaBase = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
+    Raiz = SharePoint.Contents(RutaBase, [ApiVersion = 15]),
+    CarpetaDocs = try Raiz{[Name="Documentos Compartidos"]}[Content] otherwise Raiz{[Name="Documentos"]}[Content],
+    CarpetaProyecto = CarpetaDocs{[Name=ParamProyecto]}[Content],
+    CentrosDeCosto = Table.SelectRows(CarpetaProyecto, each [Attributes]?[Kind]? = "Folder"),
+    AddCarpetaActual = Table.AddColumn(CentrosDeCosto, "ArchivosActual", each try [Content]{[Name="Actual"]}[Content] otherwise null),
+    ConCarpetaActual = Table.SelectRows(AddCarpetaActual, each [ArchivosActual] <> null),
+    ArchivosExpandidos = Table.ExpandTableColumn(ConCarpetaActual, "ArchivosActual", {"Name", "Content"}, {"FileName", "FileContent"}),
+    ArchivosProyecto = Table.Buffer(Table.SelectRows(ArchivosExpandidos, each not Text.StartsWith([FileName], "~$"))),
+    ConCentroCosto = Table.RenameColumns(ArchivosProyecto, {{"Name", "Centro de Costos"}, {"FileName", "Name"}, {"FileContent", "Content"}}),
+    Agrupado = Table.Group(ConCentroCosto, {"Centro de Costos"}, {{"Binarios", each let FilaPres = Table.SelectRows(_, each Text.Contains(Text.Upper([Name]), "ANALISIS DE PRECIOS UNITARIOS")), FilaSeg = Table.SelectRows(_, each Text.Contains(Text.Upper([Name]), "SEGUIMIENTO POR ITEMS")) in if Table.RowCount(FilaPres) > 0 and Table.RowCount(FilaSeg) > 0 then [Bin_P = FilaPres{0}[Content], Bin_S = FilaSeg{0}[Content]] else null}}),
     CentrosCompletos = Table.SelectRows(Agrupado, each [Binarios] <> null),
     TablaConDatos = Table.AddColumn(CentrosCompletos, "Datos", each FxProcesarCentroCosto([Binarios][Bin_S], [Binarios][Bin_P])),
     Expandido = Table.ExpandTableColumn(TablaConDatos, "Datos", {"Codigo ins", "Ins", "Codigo act", "Actividad", "Capitulo", "Subcapitulo", "Cantidad Proyectado", "VT Proyectado", "Cantidad Consumido", "VT Consumido"}),
