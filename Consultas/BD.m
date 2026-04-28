@@ -1,5 +1,6 @@
 let
     Tol = 0.01,
+    FnRemoveAccentsSymbols = F_Globales[FnRemoveAccentsSymbols],
 
     // 🔥 MODO CASCADA: Conexión directa a las consultas en memoria.
     T_Items_Raw = ITEMSINSUMOS,
@@ -22,7 +23,9 @@ let
         {"Codigo act", each if _ = null then "" else Text.Upper(Text.Trim(Text.From(_))), type text},
         {"Ins", each if _ = null then "" else Text.Upper(Text.Trim(Text.From(_))), type text},
         {"Tipo", each if _ = null then "" else Text.Upper(Text.Trim(Text.From(_))), type text},
-        {"# OC / Contrato", each if _ = null then null else Text.Trim(Text.From(_)), type text} 
+        {"# OC / Contrato", each if _ = null then null else Text.Trim(Text.From(_)), type text},
+        {"Nombre Contratista", each FnRemoveAccentsSymbols(if _ = null then null else Text.Trim(Text.From(_))), type text},
+        {"Descripcion contrato", each FnRemoveAccentsSymbols(if _ = null then null else Text.Trim(Text.From(_))), type text}
     }, null, MissingField.Ignore),
 
     FiltroTipoValido = Table.SelectRows(LlavesLimpias, each [Tipo] <> null and [Tipo] <> ""),

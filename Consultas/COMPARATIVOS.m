@@ -6,9 +6,8 @@ let
     FxToNumberFlex = F_Globales[FxToNumberFlex],
 
     // ============================================================
-    // PROCESAMIENTO DE LA TABLA MANUAL
+    // PROCESAMIENTO DE LA TABLA MANUAL (Det_CC sin columnas PPTO)
     // ============================================================
-    // 🔥 ACELERADOR: Origen directo desde Excel
     Origen = Excel.CurrentWorkbook(){[Name="Det_CC"]}[Content],
 
     // 1. FILTRO DE FILAS VACÍAS
@@ -46,15 +45,16 @@ let
         
         {"Cant. aprobacion", each FxToNumberFlex(_), type number},
         {"V/U aprobacion", each FxToNumberFlex(_), type number},
-        {"VR total aprobacion", each FxToNumberFlex(_), type number},
-        {"Cantidad ppto (CC)", each FxToNumberFlex(_), type number},
-        {"V/U ppto (CC)", each FxToNumberFlex(_), type number},
-        {"Valor Total ppto (CC)", each FxToNumberFlex(_), type number}
+        {"VR total aprobacion", each FxToNumberFlex(_), type number}
     }, null, MissingField.Ignore),
 
     TiposFinales = try Table.TransformColumnTypes(TextosLimpios, {{"Codigo ins", Int64.Type}}) otherwise TextosLimpios,
 
-    // 5. SALIDA (Sin doble buffer)
-    TablaFinal = TiposFinales
+    // 5. SELECCIÓN Y ORDEN FINAL DE COLUMNAS
+    TablaFinal = Table.SelectColumns(TiposFinales, 
+        {"Centro de Costos", "Subcapitulo", "Capitulo", "Actividad", "Codigo ins", "Ins", 
+         "# OC / Contrato", "Nombre Contratista", "Cant. aprobacion", "V/U aprobacion", 
+         "VR total aprobacion", "# CC - Comparativo", "# CC", "Comparativo", "Clasificador",
+         "Codigo act", "Tipo"}, MissingField.Ignore)
 in
     TablaFinal

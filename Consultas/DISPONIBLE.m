@@ -9,7 +9,7 @@ let
     // 2. LECTURA DE BASES (Conexión Directa en Memoria)
     // ============================================================
     FuentePPTO  = PPTO_BD,
-    FuenteDetCC = COMPARATIVOS,
+    FuenteDetCC = DESCARGAS,
 
     // ============================================================
     // 3. PROCESAMIENTO PPTO (Con escudo anti-errores de texto)

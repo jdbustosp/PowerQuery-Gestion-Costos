@@ -193,31 +193,31 @@ let
     // EXPANDIR Y APLICAR LÓGICA PPTO_BD
     // =========================================================
     Expandido = Table.ExpandTableColumn(TablaConDatos, "Datos", 
-        {"Codigo ins", "Ins", "Codigo act", "Actividad", "Capitulo", "Subcapitulo", "Cantidad Presupuesto", "VT Presupuesto"}),
-
-    Selected = Table.SelectColumns(Expandido, 
-        {"Proyecto", "Centro de Costos", "Codigo ins", "Ins", "Codigo act", "Actividad", "Capitulo", "Subcapitulo", "Cantidad Presupuesto", "VT Presupuesto"}),
+        {"Codigo ins", "Ins", "Actividad", "Capitulo", "Subcapitulo", "Cantidad Presupuesto", "VT Presupuesto"}),
 
     // V/U Presupuesto (VT / Cantidad)
-    AddVU = Table.AddColumn(Selected, "V/U Presupuesto", each 
+    AddVU = Table.AddColumn(Expandido, "V/U Presupuesto", each 
         if [Cantidad Presupuesto] = null or [Cantidad Presupuesto] = 0 or [VT Presupuesto] = null then null 
         else [VT Presupuesto] / [Cantidad Presupuesto], Currency.Type),
 
-    // Tipo = "PPTO"
-    AddTipo = Table.AddColumn(AddVU, "Tipo", each "PPTO", type text),
-
     // Filtrar donde VT Presupuesto <> 0
-    Filtered = Table.SelectRows(AddTipo, each [VT Presupuesto] <> null and [VT Presupuesto] <> 0),
+    Filtered = Table.SelectRows(AddVU, each [VT Presupuesto] <> null and [VT Presupuesto] <> 0),
+
+    // Selección y orden final de columnas (sin Codigo act, sin Tipo)
+    Selected = Table.SelectColumns(Filtered, 
+        {"Proyecto", "Centro de Costos", "Subcapitulo", "Capitulo", "Actividad", "Codigo ins", "Ins", 
+         "Cantidad Presupuesto", "VT Presupuesto", "V/U Presupuesto"}),
 
     // Tipos de datos finales
-    Typed = Table.TransformColumnTypes(Filtered, {
-        {"Proyecto", type text}, {"Centro de Costos", type text}, {"Codigo ins", Int64.Type}, 
-        {"Ins", type text}, {"Codigo act", type text}, {"Actividad", type text},
-        {"Capitulo", type text}, {"Subcapitulo", type text},
+    Typed = Table.TransformColumnTypes(Selected, {
+        {"Proyecto", type text}, {"Centro de Costos", type text}, 
+        {"Subcapitulo", type text}, {"Capitulo", type text}, {"Actividad", type text},
+        {"Codigo ins", Int64.Type}, {"Ins", type text},
         {"Cantidad Presupuesto", type number}, {"VT Presupuesto", Currency.Type}, 
-        {"V/U Presupuesto", Currency.Type}, {"Tipo", type text}
+        {"V/U Presupuesto", Currency.Type}
     }),
 
     TablaFinal = Typed
 in
     TablaFinal
+
