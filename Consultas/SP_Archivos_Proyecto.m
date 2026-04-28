@@ -1,59 +1,55 @@
 let
     // =========================================================
-    // 🚀 CONSULTA MAESTRA - SHAREPOINT.CONTENTS (ULTRA RÁPIDO)
-    // =========================================================
-    // Navega directamente a la carpeta del proyecto en vez de
-    // descargar el catálogo de TODOS los archivos del sitio.
+    // 🚀 API REST DE SHAREPOINT (BYPASS AL BLOQUEO)
     // =========================================================
     ParamProyecto = Text.Trim(ProyectoActual),
+    SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
+    BasePath = "/sites/MiGerenciaViv/Departamento Tecnico/COORDINACION DE PRESUPUESTOS/Reportes EDT/" & ParamProyecto,
+    Headers = [Accept="application/json;odata=nometadata"],
 
-    // PASO 1: Conectar al sitio y navegar por la estructura de carpetas
-    Site = SharePoint.Contents("https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv", [ApiVersion=15]),
-    
-    // PASO 2: Navegar al documento library → carpeta del proyecto
-    DeptTec     = Site{[Name="Departamento Tecnico"]}[Content],
-    CoordPres   = DeptTec{[Name="COORDINACION DE PRESUPUESTOS"]}[Content],
-    ReportesEDT = CoordPres{[Name="Reportes EDT"]}[Content],
-    Proyecto    = ReportesEDT{[Name=ParamProyecto]}[Content],
+    // Codificar ruta para URL (solo espacios, que es lo más común)
+    FnEncode = (path as text) as text => 
+        Text.Combine(List.Transform(Text.Split(path, "/"), each Uri.EscapeDataString(_)), "/"),
 
-    // PASO 3: Cada fila aquí es un Centro de Costos (carpeta)
-    CarpetasCC = Table.SelectRows(Proyecto, each [Kind] = "Folder"),
+    // PASO 1: Listar carpetas del proyecto (Centro de Costos)
+    FoldersUrl = SiteUrl & "/_api/web/GetFolderByServerRelativeUrl('" & FnEncode(BasePath) & "')/Folders?$select=Name",
+    CCFolders = Table.FromRecords(Json.Document(Web.Contents(FoldersUrl, [Headers=Headers]))[value]),
 
-    // PASO 4: Para cada CC, entrar a /Actual/ y leer sus archivos
-    ConArchivos = Table.AddColumn(CarpetasCC, "ArchivosActual", each 
-        try 
-            let 
-                contenidoCC = [Content],
-                actualFolder = contenidoCC{[Name="Actual"]}[Content],
-                soloArchivos = Table.SelectRows(actualFolder, each 
-                    [Kind] = "File" and not Text.StartsWith([Name], "~$")
-                )
-            in soloArchivos
-        otherwise null
+    // PASO 2: Para cada CC, listar archivos en /Actual/
+    WithFiles = Table.AddColumn(CCFolders, "Archivos", each
+        let
+            ccActualPath = BasePath & "/" & [Name] & "/Actual",
+            filesUrl = SiteUrl & "/_api/web/GetFolderByServerRelativeUrl('" & FnEncode(ccActualPath) & "')/Files?$select=Name,ServerRelativeUrl",
+            result = try Json.Document(Web.Contents(filesUrl, [Headers=Headers])) otherwise null
+        in
+            if result <> null then Table.FromRecords(result[value]) else null
+    ),
+    ValidCCs = Table.SelectRows(WithFiles, each [Archivos] <> null),
+
+    // PASO 3: Expandir archivos
+    Expanded = Table.ExpandTableColumn(ValidCCs, "Archivos", {"Name", "ServerRelativeUrl"}, {"FileName", "ServerRelativeUrl"}),
+
+    // PASO 4: Solo archivos relevantes
+    Relevant = Table.SelectRows(Expanded, each
+        not Text.StartsWith([FileName], "~$") and (
+        Text.Contains([FileName], "SEGUIMIENTO POR ITEMS", Comparer.OrdinalIgnoreCase) or
+        Text.Contains([FileName], "ANALISIS DE PRECIOS UNITARIOS", Comparer.OrdinalIgnoreCase) or
+        Text.Contains([FileName], "INFORMEORDEN", Comparer.OrdinalIgnoreCase) or
+        Text.Contains([FileName], "ESTADO DE ORDENES", Comparer.OrdinalIgnoreCase) or
+        Text.Contains([FileName], "ESTADO DE CONTRATOS", Comparer.OrdinalIgnoreCase) or
+        Text.Contains([FileName], "DESCUENTOS", Comparer.OrdinalIgnoreCase))
     ),
 
-    // PASO 5: Filtrar CCs que no tienen carpeta Actual
-    CCValidos = Table.SelectRows(ConArchivos, each [ArchivosActual] <> null),
-
-    // PASO 6: Expandir archivos con el nombre del CC
-    Expandido = Table.ExpandTableColumn(
-        Table.SelectColumns(CCValidos, {"Name", "ArchivosActual"}),
-        "ArchivosActual", 
-        {"Name", "Content"}, 
-        {"FileName", "Content"}
-    ),
-    Renombrado = Table.RenameColumns(Expandido, {{"Name", "Centro de Costos"}, {"FileName", "Name"}}),
-
-    // PASO 7: Pre-filtrar SOLO los archivos que usamos (6 tipos)
-    SoloRelevantes = Table.SelectRows(Renombrado, each 
-        Text.Contains([Name], "SEGUIMIENTO POR ITEMS", Comparer.OrdinalIgnoreCase) or
-        Text.Contains([Name], "ANALISIS DE PRECIOS UNITARIOS", Comparer.OrdinalIgnoreCase) or
-        Text.Contains([Name], "INFORMEORDEN", Comparer.OrdinalIgnoreCase) or
-        Text.Contains([Name], "ESTADO DE ORDENES", Comparer.OrdinalIgnoreCase) or
-        Text.Contains([Name], "ESTADO DE CONTRATOS", Comparer.OrdinalIgnoreCase) or
-        Text.Contains([Name], "DESCUENTOS", Comparer.OrdinalIgnoreCase)
+    // PASO 5: Descargar contenido de cada archivo
+    WithContent = Table.AddColumn(Relevant, "Content", each
+        Web.Contents(SiteUrl & "/_api/web/GetFileByServerRelativeUrl('" & FnEncode([ServerRelativeUrl]) & "')/$value")
     ),
 
-    TablaFinal = Table.Buffer(SoloRelevantes)
+    // PASO 6: Limpiar columnas
+    Final = Table.RenameColumns(
+        Table.SelectColumns(WithContent, {"Name", "FileName", "Content"}),
+        {{"Name", "Centro de Costos"}, {"FileName", "Name"}}
+    ),
+    TablaFinal = Table.Buffer(Final)
 in
     TablaFinal
