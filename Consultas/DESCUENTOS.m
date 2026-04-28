@@ -10,9 +10,9 @@ let
     // ============================================================
     FxProcesarDescuentos = (Binario as binary) =>
         let
-            HtmlTexto = Text.FromBinary(Binario, 1252),
             Columnas_HTML = List.Transform({1..15}, each {"Columna" & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}),
-            RawTable = Html.Table(HtmlTexto, Columnas_HTML, [RowSelector="tr"]),
+            RawTable = try Excel.Workbook(Binario, null, true){0}[Data]
+                       otherwise Html.Table(Text.FromBinary(Binario, 1252), Columnas_HTML, [RowSelector="tr"]),
             
             FilasLimpias = Table.SelectRows(RawTable, each [Columna1] <> "GRAN TOTAL" and [Columna1] <> "DESCUENTOS SALIDAS" and [Columna1] <> null),
             FillContrato = Table.FillDown(Table.AddColumn(FilasLimpias, "ContratoInfo", each let txt = Text.Trim(Text.From([Columna1] ?? "")) in if Text.StartsWith(Text.Upper(txt), "CONTRATO") then txt else null), {"ContratoInfo"}),
