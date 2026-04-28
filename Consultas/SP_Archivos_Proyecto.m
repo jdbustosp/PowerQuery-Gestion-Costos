@@ -1,24 +1,51 @@
 let
     // =========================================================
-    // 🔥 CONSULTA MAESTRA DE SHAREPOINT (UNA SOLA LLAMADA)
+    // 🚀 CONSULTA MAESTRA - SHAREPOINT.CONTENTS (ULTRA RÁPIDO)
+    // =========================================================
+    // Navega directamente a la carpeta del proyecto en vez de
+    // descargar el catálogo de TODOS los archivos del sitio.
     // =========================================================
     ParamProyecto = Text.Trim(ProyectoActual),
-    RutaBase = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
-    ArchivosSharePoint = SharePoint.Files(RutaBase, [ApiVersion = 15]),
 
-    // 🔥 PASO 1: Reducir columnas ANTES de filtrar (libera RAM desde el inicio)
-    SoloColumnasNecesarias = Table.SelectColumns(ArchivosSharePoint, {"Name", "Content", "Folder Path"}),
+    // PASO 1: Conectar al sitio y navegar por la estructura de carpetas
+    Site = SharePoint.Contents("https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv", [ApiVersion=15]),
+    
+    // PASO 2: Navegar al documento library → carpeta del proyecto
+    DeptTec     = Site{[Name="Departamento Tecnico"]}[Content],
+    CoordPres   = DeptTec{[Name="COORDINACION DE PRESUPUESTOS"]}[Content],
+    ReportesEDT = CoordPres{[Name="Reportes EDT"]}[Content],
+    Proyecto    = ReportesEDT{[Name=ParamProyecto]}[Content],
 
-    // 🔥 PASO 2: Filtro por proyecto y /Actual/
-    ArchivosProyecto = Table.SelectRows(SoloColumnasNecesarias, each 
-        Text.Contains([Folder Path], "/" & ParamProyecto & "/", Comparer.OrdinalIgnoreCase) and 
-        Text.EndsWith([Folder Path], "/Actual/", Comparer.OrdinalIgnoreCase) and 
-        not Text.StartsWith([Name], "~$")
+    // PASO 3: Cada fila aquí es un Centro de Costos (carpeta)
+    CarpetasCC = Table.SelectRows(Proyecto, each [Kind] = "Folder"),
+
+    // PASO 4: Para cada CC, entrar a /Actual/ y leer sus archivos
+    ConArchivos = Table.AddColumn(CarpetasCC, "ArchivosActual", each 
+        try 
+            let 
+                contenidoCC = [Content],
+                actualFolder = contenidoCC{[Name="Actual"]}[Content],
+                soloArchivos = Table.SelectRows(actualFolder, each 
+                    [Kind] = "File" and not Text.StartsWith([Name], "~$")
+                )
+            in soloArchivos
+        otherwise null
     ),
 
-    // 🔥 PASO 3: Pre-filtrar SOLO los archivos que realmente usamos
-    // Esto evita que Table.Buffer guarde archivos irrelevantes
-    ArchivosRelevantes = Table.SelectRows(ArchivosProyecto, each 
+    // PASO 5: Filtrar CCs que no tienen carpeta Actual
+    CCValidos = Table.SelectRows(ConArchivos, each [ArchivosActual] <> null),
+
+    // PASO 6: Expandir archivos con el nombre del CC
+    Expandido = Table.ExpandTableColumn(
+        Table.SelectColumns(CCValidos, {"Name", "ArchivosActual"}),
+        "ArchivosActual", 
+        {"Name", "Content"}, 
+        {"FileName", "Content"}
+    ),
+    Renombrado = Table.RenameColumns(Expandido, {{"Name", "Centro de Costos"}, {"FileName", "Name"}}),
+
+    // PASO 7: Pre-filtrar SOLO los archivos que usamos (6 tipos)
+    SoloRelevantes = Table.SelectRows(Renombrado, each 
         Text.Contains([Name], "SEGUIMIENTO POR ITEMS", Comparer.OrdinalIgnoreCase) or
         Text.Contains([Name], "ANALISIS DE PRECIOS UNITARIOS", Comparer.OrdinalIgnoreCase) or
         Text.Contains([Name], "INFORMEORDEN", Comparer.OrdinalIgnoreCase) or
@@ -27,13 +54,6 @@ let
         Text.Contains([Name], "DESCUENTOS", Comparer.OrdinalIgnoreCase)
     ),
 
-    // PASO 4: Extraemos el Centro de Costos de la ruta
-    ConCentroCosto = Table.AddColumn(ArchivosRelevantes, "Centro de Costos", each 
-        Text.Trim(Text.Replace(Text.AfterDelimiter([Folder Path], "/" & ParamProyecto & "/"), "/Actual/", ""))
-    ),
-
-    // PASO 5: Eliminamos Folder Path (ya no la necesitamos) y bufferizamos
-    ColumnasMinimas = Table.SelectColumns(ConCentroCosto, {"Name", "Content", "Centro de Costos"}),
-    TablaFinal = Table.Buffer(ColumnasMinimas)
+    TablaFinal = Table.Buffer(SoloRelevantes)
 in
     TablaFinal
