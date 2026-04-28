@@ -38,7 +38,6 @@ let
     // ============================================================
     RutaBase = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
     ArchivosSharePoint = SharePoint.Files(RutaBase, [ApiVersion = 15]),
-    ParamProyecto = Text.Trim(ProyectoActual),
     ArchivosProyecto = Table.SelectRows(ArchivosSharePoint, each 
         Text.Contains(Text.Upper([Folder Path]), "/" & Text.Upper(ParamProyecto) & "/") and 
         Text.EndsWith([Folder Path], "/Actual/") and 
