@@ -7,20 +7,10 @@ let
     // =========================================================
     // FUNCIONES AUXILIARES GLOBALES
     // =========================================================
-    FnFormatCodigoAct = (raw as any) as nullable text => let txtRaw = if raw = null then null else Text.Trim(Text.From(raw)), result = if txtRaw = null or txtRaw = "" then null else let txtNorm = Text.Replace(Text.Replace(txtRaw, ",", "."), " ", ""), hasDot = Text.Contains(txtNorm, ".") in if hasDot then txtNorm else let digits = Text.Select(txtNorm, {"0".."9"}), len = Text.Length(digits) in if len <= 3 then null else Text.Range(digits, 0, len - 3) & "." & Text.Range(digits, len - 3, 3) in result,
-    FnParseNumber = (value as any) as nullable number => let numValue = if value = null then null else if Type.Is(Value.Type(value), type number) then value else let txt0 = Text.Trim(Text.From(value)), tUS = try Number.FromText(txt0, "en-US"), tES = try Number.FromText(txt0, "es-ES") in if not tUS[HasError] then tUS[Value] else if not tES[HasError] then tES[Value] else null in numValue,
-    
-    // 🔥 EL ESCUDO ANTI-JEROGLÍFICOS (Añadido soporte total para SINCO)
-    FnRemoveAccentsSymbols = (t as nullable text) as nullable text => if t = null then null else let initial = Text.From(t), 
-        replacements = {
-            {"á","a"},{"Á","A"},{"é","e"},{"É","E"},{"í","i"},{"Í","I"},{"ó","o"},{"Ó","O"},{"ú","u"},{"Ú","U"},
-            {"º",""},{"°",""},{"¨",""},
-            // Por si acaso SINCO manda basura directamente:
-            {"Ã“","O"}, {"Ã‘","N"}, {"Ã¡","A"}, {"Ã©","E"}, {"Ã³","O"}, {"Ãº","U"}, {"Ã","A"}
-        }, 
-        result = List.Accumulate(replacements, initial, (state, current) => Text.Replace(state, current{0}, current{1})) in result,
-    
-    FnPrepareTableWithHeader = (tbl as table) as table => let firstColName = Table.ColumnNames(tbl){0}, firstColValues = Table.Column(tbl, firstColName), headerFlags = List.Transform(firstColValues, (x) => let txt = Text.Upper(if x = null then "" else Text.From(x)), txtNorm = Text.Replace(txt, "Ó", "O") in Text.Contains(txtNorm, "COD")), hasHeader = List.Contains(headerFlags, true), promoted = if hasHeader then let headerIndex = List.PositionOf(headerFlags, true), skipped  = Table.Skip(tbl, headerIndex) in Table.PromoteHeaders(skipped, [PromoteAllScalars = true]) else tbl in promoted,
+    FnFormatCodigoAct = F_Globales[FnFormatCodigoAct],
+    FnParseNumber = F_Globales[FxToNumberFlex],
+    FnRemoveAccentsSymbols = F_Globales[FnRemoveAccentsSymbols],
+    FnPrepareTableWithHeader = F_Globales[FnPrepareTableWithHeader],
     Columnas_HTML = List.Transform({1..40}, each {"Columna " & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}),
 
     // =========================================================
@@ -94,6 +84,6 @@ let
     ColumnasUtiles = Table.SelectColumns(Expandido, {"Centro de Costos", "Codigo ins", "Ins", "Codigo act", "Actividad", "Capitulo", "Subcapitulo", "Cantidad Proyectado", "VT Proyectado", "Cantidad Consumido", "VT Consumido"}),
     TiposFinales = Table.TransformColumnTypes(ColumnasUtiles,{{"Centro de Costos", type text}, {"Codigo ins", Int64.Type}, {"Cantidad Proyectado", type number}, {"VT Proyectado", Currency.Type}, {"Cantidad Consumido", type number}, {"VT Consumido", Currency.Type}}),
     
-    TablaEnMemoria = Table.Buffer(TiposFinales)
+    TablaEnMemoria = TiposFinales
 in 
     TablaEnMemoria

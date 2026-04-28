@@ -1,44 +1,15 @@
 let
     // ============================================================
-    // FUNCIONES AUXILIARES GLOBALES (Para hablar el mismo idioma)
+    // FUNCIONES AUXILIARES GLOBALES (Desde F_Globales)
     // ============================================================
-    FnFormatCodigoAct = (raw as any) as nullable text =>
-        let
-            txtRaw  = if raw = null then null else Text.Trim(Text.From(raw)),
-            result =
-                if txtRaw = null or txtRaw = "" then null
-                else
-                    let
-                        txtNorm = Text.Replace(Text.Replace(txtRaw, ",", "."), " ", ""),
-                        hasDot  = Text.Contains(txtNorm, ".")
-                    in
-                        if hasDot then txtNorm
-                        else
-                            let
-                                digits = Text.Select(txtNorm, {"0".."9"}),
-                                len    = Text.Length(digits)
-                            in
-                                if len <= 3 then null
-                                else Text.Range(digits, 0, len - 3) & "." & Text.Range(digits, len - 3, 3)
-        in result,
-
-    FxToNumberFlex = (value as any) as nullable number =>
-        let
-            v = value,
-            numeroDirecto = if Value.Is(v, type number) then Number.From(v) else null
-        in
-            if numeroDirecto <> null then numeroDirecto else
-            let t0 = if v=null then "" else Text.From(v), t = Text.Trim(Text.Replace(Text.Replace(t0, "#(00A0)", ""), " ", "")) in
-            if t="" then null else
-            let tryUS = try Number.FromText(t, "en-US"), valUS = if tryUS[HasError] then null else tryUS[Value] in
-            if valUS<>null then valUS else
-            let tryES = try Number.FromText(t, "es-ES"), valES = if tryES[HasError] then null else tryES[Value] in valES,
+    FnFormatCodigoAct = F_Globales[FnFormatCodigoAct],
+    FxToNumberFlex = F_Globales[FxToNumberFlex],
 
     // ============================================================
     // PROCESAMIENTO DE LA TABLA MANUAL
     // ============================================================
-    // 🔥 ACELERADOR: Cargamos la tabla a la RAM desde el inicio
-    Origen = Table.Buffer(Excel.CurrentWorkbook(){[Name="Det_CC"]}[Content]),
+    // 🔥 ACELERADOR: Origen directo desde Excel
+    Origen = Excel.CurrentWorkbook(){[Name="Det_CC"]}[Content],
 
     // 1. FILTRO DE FILAS VACÍAS
     FilasValidas = Table.SelectRows(Origen, each [Ins] <> null or [Actividad] <> null),
@@ -83,7 +54,7 @@ let
 
     TiposFinales = try Table.TransformColumnTypes(TextosLimpios, {{"Codigo ins", Int64.Type}}) otherwise TextosLimpios,
 
-    // 5. BUFFER QUIRÚRGICO
-    TablaEnMemoria = Table.Buffer(TiposFinales)
+    // 5. SALIDA (Sin doble buffer)
+    TablaFinal = TiposFinales
 in
-    TablaEnMemoria
+    TablaFinal

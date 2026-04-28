@@ -2,9 +2,9 @@ let
     // ============================================================
     // FUNCIONES AUXILIARES GLOBALES
     // ============================================================
-    FnFormatCodigoAct = (raw as any) as nullable text => let txtRaw = if raw = null then null else Text.Trim(Text.From(raw)), result = if txtRaw = null or txtRaw = "" then null else let txtNorm = Text.Replace(Text.Replace(txtRaw, ",", "."), " ", ""), hasDot = Text.Contains(txtNorm, ".") in if hasDot then txtNorm else let digits = Text.Select(txtNorm, {"0".."9"}), len = Text.Length(digits) in if len <= 3 then null else Text.Range(digits, 0, len - 3) & "." & Text.Range(digits, len - 3, 3) in result,
-    FnPrepareTableWithHeader = (tbl as table) as table => let firstColName = Table.ColumnNames(tbl){0}, firstColValues = Table.Column(tbl, firstColName), headerFlags = List.Transform(firstColValues, (x) => let txt = Text.Upper(if x = null then "" else Text.From(x)), txtNorm = Text.Replace(txt, "Ó", "O") in Text.Contains(txtNorm, "COD")), hasHeader = List.Contains(headerFlags, true), promoted = if hasHeader then let headerIndex = List.PositionOf(headerFlags, true), skipped = Table.Skip(tbl, headerIndex) in Table.PromoteHeaders(skipped, [PromoteAllScalars = true]) else tbl in promoted,
-    FxToNumberFlex = (value as any) as nullable number => let v = value, numeroDirecto = if Value.Is(v, type number) then Number.From(v) else null in if numeroDirecto <> null then numeroDirecto else let t0 = if v=null then "" else Text.From(v), t = Text.Trim(Text.Replace(Text.Replace(t0, "#(00A0)", ""), " ", "")) in if t="" then null else let tryUS = try Number.FromText(t, "en-US"), valUS = if tryUS[HasError] then null else tryUS[Value] in if valUS<>null then valUS else let tryES = try Number.FromText(t, "es-ES"), valES = if tryES[HasError] then null else tryES[Value] in valES,
+    FnFormatCodigoAct = F_Globales[FnFormatCodigoAct],
+    FnPrepareTableWithHeader = F_Globales[FnPrepareTableWithHeader],
+    FxToNumberFlex = F_Globales[FxToNumberFlex],
     replacements = {{"á","a"},{"Á","A"},{"é","e"},{"É","E"},{"í","i"},{"Í","I"},{"ó","o"},{"Ó","O"},{"ú","u"},{"Ú","U"},{"º",""},{"°",""},{"¨",""}},
     Normalize = (t as nullable text) => let txt = if t=null then "" else Text.From(t), result = List.Accumulate(replacements, txt, (state,current)=> Text.Replace(state, current{0}, current{1})) in Text.Trim(result),
     FxClaveTexto = (t as nullable text) => let clean = Normalize(t), sinPar = if Text.Contains(clean,"(") then Text.BeforeDelimiter(clean,"(") else clean, palabras = List.Select(Text.Split(sinPar," "), each _<> ""), base = if List.Count(palabras)=0 then null else Text.Lower(Text.Combine(palabras," ")) in base,
@@ -56,7 +56,7 @@ let
     // ============================================================
     // LECTURA DIRECTA A EXCEL (MAESTROS LOCALES - 🔥 MODO ESTRICTO)
     // ============================================================
-    ITEMS_TablaLocal = Table.Buffer(Excel.CurrentWorkbook(){[Name="TbItems"]}[Content]),
+    ITEMS_TablaLocal = Excel.CurrentWorkbook(){[Name="TbItems"]}[Content],
     ITEMS_Clean = Table.TransformColumns(ITEMS_TablaLocal, {
         {"Centro de Costos", each if _ = null then null else Text.Upper(Text.Trim(Text.From(_))), type text},
         {"Codigo act", each FnFormatCodigoAct(_), type text}
@@ -119,6 +119,6 @@ let
 
     SelectedFinal = Table.SelectColumns(Table.AddColumn(Table.AddColumn(FilteredZeros, "Tipo", each "COMPRAS", type text), "Descripcion contrato", each "pedido obra", type text), {"Centro de Costos", "Codigo ins", "Ins", "Codigo act", "Actividad", "Capitulo", "Subcapitulo", "# OC / Contrato", "Nombre Contratista", "Descripcion contrato", "Cantidad Comprado", "VT Comprado", "V/U Comprado", "Tipo"}),
     TypedFinal = Table.TransformColumnTypes(SelectedFinal, {{"Centro de Costos", type text}, {"Codigo ins", Int64.Type}, {"Cantidad Comprado", type number}, {"VT Comprado", type number}, {"V/U Comprado", type number}}),
-    TablaFinal = Table.Buffer(TypedFinal)
+    TablaFinal = TypedFinal
 in
     TablaFinal

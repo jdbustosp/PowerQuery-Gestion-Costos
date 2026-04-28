@@ -10,8 +10,8 @@ let
     // ============================================================
     // 2. LECTURA DE BASES
     // ============================================================
-    FuentePPTO  = Table.Buffer(Excel.CurrentWorkbook(){[Name="PPTO_BD"]}[Content]),
-    FuenteDetCC = Table.Buffer(Excel.CurrentWorkbook(){[Name="COMPARATIVOS"]}[Content]),
+    FuentePPTO  = Excel.CurrentWorkbook(){[Name="PPTO_BD"]}[Content],
+    FuenteDetCC = Excel.CurrentWorkbook(){[Name="COMPARATIVOS"]}[Content],
 
     // ============================================================
     // 3. PROCESAMIENTO PPTO (Con escudo anti-errores de texto)
@@ -47,7 +47,7 @@ let
     }, null, MissingField.Ignore),
     
     DetCC_WithStdIns = Table.AddColumn(DetCC_Typed, "InsNorm", each FnRemoveAccentsSymbols([Ins]), type text),
-    DetCC_Valid = Table.Buffer(Table.SelectRows(DetCC_WithStdIns, each [#"# CC - Comparativo"] <> null)),
+    DetCC_Valid = Table.SelectRows(DetCC_WithStdIns, each [#"# CC - Comparativo"] <> null),
 
     // ============================================================
     // 5. CRUCE 1: Alinear la base Adjudicada contra la estructura oficial
@@ -92,6 +92,6 @@ let
     
     Final_Ordered = Table.ReorderColumns(UnionFiltered, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "Ins", "# CC - Comparativo", "Tipo", "Cantidad_Calc", "V/U ppto (CC)", "Valor Total ppto (CC)"}, MissingField.Ignore),
     
-    TablaFinal = Table.Buffer(Final_Ordered)
+    TablaFinal = Final_Ordered
 in
     TablaFinal

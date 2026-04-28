@@ -2,21 +2,9 @@ let
     // ============================================================
     // 1. FUNCIONES AUXILIARES GLOBALES
     // ============================================================
-    FnFormatCodigoAct = (raw as any) as nullable text => let txtRaw = if raw = null then null else Text.Trim(Text.From(raw)), result = if txtRaw = null or txtRaw = "" then null else let txtNorm = Text.Replace(Text.Replace(txtRaw, ",", "."), " ", ""), hasDot = Text.Contains(txtNorm, ".") in if hasDot then txtNorm else let digits = Text.Select(txtNorm, {"0".."9"}), len = Text.Length(digits) in if len <= 3 then null else Text.Range(digits, 0, len - 3) & "." & Text.Range(digits, len - 3, 3) in result,
-    FxToNumberFlex = (value as any) as nullable number => let v = value, numeroDirecto = if Value.Is(v, type number) then Number.From(v) else null in if numeroDirecto <> null then numeroDirecto else let t0 = if v=null then "" else Text.From(v), t = Text.Trim(Text.Replace(Text.Replace(t0, "#(00A0)", ""), " ", "")) in if t="" then null else let tryUS = try Number.FromText(t, "en-US"), valUS = if tryUS[HasError] then null else tryUS[Value] in if valUS<>null then valUS else let tryES = try Number.FromText(t, "es-ES"), valES = if tryES[HasError] then null else tryES[Value] in valES,
-    
-    // 🔥 LA LLAVE MAESTRA CORREGIDA: Elimina la unidad de medida antes de limpiar, garantizando el cruce.
-    FnClaveLimpia = (t as nullable text) as nullable text => 
-        if t = null then null 
-        else let 
-            // 1. Cortar el texto antes del primer paréntesis para ignorar las unidades (GL), (UN), etc.
-            sinUnidad = if Text.Contains(t, "(") then Text.BeforeDelimiter(t, "(") else t,
-            t1 = Text.Upper(Text.Trim(sinUnidad)),
-            // 2. Limpiar tildes y eñes
-            t2 = List.Accumulate({{"Á","A"},{"É","E"},{"Í","I"},{"Ó","O"},{"Ú","U"},{"Ñ","N"},{"Ü","U"}}, t1, (state, current) => Text.Replace(state, current{0}, current{1})),
-            // 3. Dejar solo el esqueleto de letras y números
-            t3 = Text.Select(t2, {"A".."Z", "0".."9"})
-        in if t3 = "" then null else t3,
+    FnFormatCodigoAct = F_Globales[FnFormatCodigoAct],
+    FxToNumberFlex = F_Globales[FxToNumberFlex],
+    FnClaveLimpia = F_Globales[FnClaveLimpia],
 
     Columnas_HTML = List.Transform({1..40}, each {"Columna" & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}),
 
@@ -86,7 +74,7 @@ let
     // ============================================================
     // 4. LECTURA DE LA HOJA LOCAL EXCEL (EL DICCIONARIO OFICIAL)
     // ============================================================
-    ITEMS_Raw = try Table.Buffer(Excel.CurrentWorkbook(){[Name="TbItems"]}[Content]) otherwise Table.Buffer(ITEMSINSUMOS),
+    ITEMS_Raw = try Excel.CurrentWorkbook(){[Name="TbItems"]}[Content] otherwise Table.Buffer(ITEMSINSUMOS),
     
     ITEMS_Clean = Table.Buffer(Table.TransformColumns(ITEMS_Raw, {
         {"Centro de Costos", each if _ = null then null else Text.Upper(Text.Trim(Text.From(_))), type text},
@@ -133,6 +121,6 @@ let
     
     FilteredZeros = Table.SelectRows(Typed, each ([VT Contratado] <> 0 and [VT Contratado] <> null)),
     
-    TablaFinal = Table.Buffer(FilteredZeros)
+    TablaFinal = FilteredZeros
 in
     TablaFinal

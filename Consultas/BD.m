@@ -2,15 +2,15 @@ let
     Tol = 0.01,
 
     // 🔥 MODO ESTRICTO: Carga 100% local. Sin descargas en segundo plano.
-    T_Items_Raw = Table.Buffer(Excel.CurrentWorkbook(){[Name="TbItems"]}[Content]),
+    T_Items_Raw = Excel.CurrentWorkbook(){[Name="TbItems"]}[Content],
     T_Items = if Table.HasColumns(T_Items_Raw, "Tipo") then T_Items_Raw else Table.AddColumn(T_Items_Raw, "Tipo", each "ITEMS", type text),
 
-    T_Compras = Table.Buffer(Excel.CurrentWorkbook(){[Name="COMPRAS"]}[Content]),
-    T_Contratos = Table.Buffer(Excel.CurrentWorkbook(){[Name="CONTRATOS"]}[Content]),
-    T_Ppto = Table.Buffer(Excel.CurrentWorkbook(){[Name="PPTO_BD"]}[Content]),
-    T_Comp = Table.Buffer(Excel.CurrentWorkbook(){[Name="COMPARATIVOS"]}[Content]),
-    T_Desc = Table.Buffer(Excel.CurrentWorkbook(){[Name="DESCUENTOS"]}[Content]),
-    T_Disp = Table.Buffer(Excel.CurrentWorkbook(){[Name="DISPONIBLE"]}[Content]),
+    T_Compras = Excel.CurrentWorkbook(){[Name="COMPRAS"]}[Content],
+    T_Contratos = Excel.CurrentWorkbook(){[Name="CONTRATOS"]}[Content],
+    T_Ppto = Excel.CurrentWorkbook(){[Name="PPTO_BD"]}[Content],
+    T_Comp = Excel.CurrentWorkbook(){[Name="COMPARATIVOS"]}[Content],
+    T_Desc = Excel.CurrentWorkbook(){[Name="DESCUENTOS"]}[Content],
+    T_Disp = Excel.CurrentWorkbook(){[Name="DISPONIBLE"]}[Content],
 
     Origen = Table.Combine({T_Items, T_Compras, T_Contratos, T_Ppto, T_Comp, T_Desc, T_Disp}),
 
@@ -84,6 +84,6 @@ let
     type number),
 
     FinalClean = Table.RemoveColumns(AplicarProyeccion, {"Esc1", "Esc3", "Esc2", "Esc4", "Esc5"}),
-    TablaMaestraFinal = Table.Buffer(FinalClean)
+    TablaMaestraFinal = FinalClean
 in
     TablaMaestraFinal
