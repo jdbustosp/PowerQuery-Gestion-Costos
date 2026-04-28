@@ -1,10 +1,5 @@
 let
     // =========================================================
-    // ASEGURAMOS EL PARÁMETRO GLOBAL
-    // =========================================================
-    ParamProyecto = Text.Trim(ProyectoActual),
-
-    // =========================================================
     // FUNCIONES AUXILIARES GLOBALES
     // =========================================================
     FnFormatCodigoAct = F_Globales[FnFormatCodigoAct],
