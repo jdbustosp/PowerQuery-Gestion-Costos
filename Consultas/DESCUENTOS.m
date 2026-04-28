@@ -11,15 +11,18 @@ let
     FxProcesarDescuentos = (Binario as binary) =>
         let
             Columnas_HTML = List.Transform({1..15}, each {"Columna" & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}),
-            RawTable = try Excel.Workbook(Binario, null, true){0}[Data]
+            RawTable_0 = try Excel.Workbook(Binario, null, true){0}[Data]
                        otherwise Html.Table(Text.FromBinary(Binario, 1252), Columnas_HTML, [RowSelector="tr"]),
+            // Estandarizar nombres de columnas
+            RawTable_ColNames = Table.ColumnNames(RawTable_0),
+            RawTable = Table.RenameColumns(RawTable_0, List.Zip({RawTable_ColNames, List.Transform({1..List.Count(RawTable_ColNames)}, each "Columna" & Text.From(_))})),
             
             FilasLimpias = Table.SelectRows(RawTable, each [Columna1] <> "GRAN TOTAL" and [Columna1] <> "DESCUENTOS SALIDAS" and [Columna1] <> null),
-            FillContrato = Table.FillDown(Table.AddColumn(FilasLimpias, "ContratoInfo", each let txt = Text.Trim(Text.From([Columna1] ?? "")) in if Text.StartsWith(Text.Upper(txt), "CONTRATO") then txt else null), {"ContratoInfo"}),
-            AddOCContrato = Table.AddColumn(FillContrato, "# OC / Contrato", each let raw = Text.Select(Text.From([ContratoInfo] ?? ""), {"0".."9"}) in if raw = "" then null else raw, type text),
-            AddCodigoAct = Table.AddColumn(AddOCContrato, "Codigo act", each let txt = Text.Trim(Text.From([Columna3] ?? "")), baseCod = if Text.Contains(txt, " ") then Text.BeforeDelimiter(txt, " ") else txt in if baseCod = "" then null else FnFormatCodigoAct(baseCod), type text),
+            FillContrato = Table.FillDown(Table.AddColumn(FilasLimpias, "ContratoInfo", each let txt = Text.Trim(Text.From(if [Columna1] = null then "" else [Columna1])) in if Text.StartsWith(Text.Upper(txt), "CONTRATO") then txt else null), {"ContratoInfo"}),
+            AddOCContrato = Table.AddColumn(FillContrato, "# OC / Contrato", each let raw = Text.Select(Text.From(if [ContratoInfo] = null then "" else [ContratoInfo]), {"0".."9"}) in if raw = "" then null else raw, type text),
+            AddCodigoAct = Table.AddColumn(AddOCContrato, "Codigo act", each let txt = Text.Trim(Text.From(if [Columna3] = null then "" else [Columna3])), baseCod = if Text.Contains(txt, " ") then Text.BeforeDelimiter(txt, " ") else txt in if baseCod = "" then null else FnFormatCodigoAct(baseCod), type text),
             
-            AddValorDescuento = Table.AddColumn(AddCodigoAct, "Valor descuento", each let rawTxt = Text.Remove(Text.Trim(Text.From([Columna7] ?? "")), {"$", " "}) in FxToNumberFlex(rawTxt), Currency.Type),
+            AddValorDescuento = Table.AddColumn(AddCodigoAct, "Valor descuento", each let rawTxt = Text.Remove(Text.Trim(Text.From(if [Columna7] = null then "" else [Columna7])), {"$", " "}) in FxToNumberFlex(rawTxt), Currency.Type),
             
             BaseFinal = Table.SelectColumns(Table.SelectRows(AddValorDescuento, each [#"# OC / Contrato"] <> null and [Codigo act] <> null and [Valor descuento] <> null and [Valor descuento] <> 0), {"# OC / Contrato", "Codigo act", "Valor descuento"})
         in BaseFinal,

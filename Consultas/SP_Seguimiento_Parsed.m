@@ -17,7 +17,7 @@ let
             // 🚀 Excel.Workbook es 3-5x más rápido que Html.Table
             OrigenItems = try Excel.Workbook(BinarioSeguimiento, null, true){0}[Data]
                           otherwise Html.Table(Text.FromBinary(BinarioSeguimiento, 65001), Columnas_HTML, [RowSelector="tr"]),
-            ItemsPrepared    = FnPrepareTableWithHeader(OrigenItems),
+            ItemsPrepared    = Table.Buffer(FnPrepareTableWithHeader(OrigenItems)),
 
             ItemsColNames    = Table.ColumnNames(ItemsPrepared),
             ItemsCodColName  = ItemsColNames{0}, ItemsDescColName = ItemsColNames{1}, ItemsTipoColName = ItemsColNames{2}, ItemsUMColName = ItemsColNames{3},
@@ -60,11 +60,14 @@ let
             OrigenAPU_Raw = try Excel.Workbook(BinarioPresupuesto, null, true){0}[Data]
                             otherwise Html.Table(Text.FromBinary(BinarioPresupuesto, 65001), 
                                 List.Transform({1..3}, each {"Columna " & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}), [RowSelector="tr"]),
-            OrigenAPU = Table.SelectColumns(OrigenAPU_Raw, List.FirstN(Table.ColumnNames(OrigenAPU_Raw), 3)),
+            // Estandarizar los nombres de las primeras 3 columnas a Columna 1, 2, 3 sin importar el origen
+            OrigenAPU_Cols = Table.SelectColumns(OrigenAPU_Raw, List.FirstN(Table.ColumnNames(OrigenAPU_Raw), 3)),
+            OrigenAPU = Table.RenameColumns(OrigenAPU_Cols, List.Zip({Table.ColumnNames(OrigenAPU_Cols), {"Columna 1", "Columna 2", "Columna 3"}})),
             
             APU_Paso1 = Table.AddColumn(OrigenAPU, "Cod_Temp", each 
                 let 
-                    c1 = Text.Trim(Text.From([#"Columna 1"] ?? "")),
+                    c1Value = if [#"Columna 1"] = null then "" else [#"Columna 1"],
+                    c1 = Text.Trim(Text.From(c1Value)),
                     hasDash = Text.Contains(c1, "-"),
                     preDash = if hasDash then Text.Trim(Text.BeforeDelimiter(c1, "-")) else "",
                     esNum = try Number.FromText(preDash) otherwise null
@@ -73,7 +76,8 @@ let
             APU_Paso2 = Table.SelectRows(APU_Paso1, each [Cod_Temp] <> null),
             APU_Diccionario = Table.AddColumn(APU_Paso2, "NombreActAPU", each 
                 let 
-                    rawName = Text.AfterDelimiter(Text.From([#"Columna 1"] ?? ""), "-"),
+                    c1Value = if [#"Columna 1"] = null then "" else [#"Columna 1"],
+                    rawName = Text.AfterDelimiter(Text.From(c1Value), "-"),
                     cleanName = Text.Trim(Text.Replace(Text.Replace(Text.Replace(rawName, "#(lf)", " "), "#(cr)", " "), "#(00A0)", " "))
                 in cleanName, type text
             ),
@@ -88,12 +92,12 @@ let
             // Nombre oficial de Actividad
             ItemsWithActividad = Table.AddColumn(ItemsExpandedAPU, "Actividad", each 
                 let 
-                    codTxt = [Codigo act] ?? "",
-                    nombreExtraido = Text.Trim(Text.From([NombreActAPU] ?? "")),
+                    codTxt = if [Codigo act] = null then "" else [Codigo act],
+                    nombreExtraido = Text.Trim(Text.From(if [NombreActAPU] = null then "" else [NombreActAPU])),
                     nombreReal = if nombreExtraido = "" then "Actividad " & codTxt else nombreExtraido,
-                    subcapTxt = Text.Trim(Text.From([Subcapitulo] ?? "")),
+                    subcapTxt = Text.Trim(Text.From(if [Subcapitulo] = null then "" else [Subcapitulo])),
                     nombreSinSubcap = if subcapTxt <> "" then Text.Replace(nombreReal, subcapTxt, "") else nombreReal,
-                    umTxt = Text.Trim(Text.From([UM_Actividad] ?? "")),
+                    umTxt = Text.Trim(Text.From(if [UM_Actividad] = null then "" else [UM_Actividad])),
                     nombreLimpio = Text.Combine(List.Select(Text.Split(nombreSinSubcap, " "), each _ <> ""), " "),
                     actTxt = if umTxt = "" then codTxt & "-" & nombreLimpio else codTxt & "-" & nombreLimpio & " (" & umTxt & ")"
                 in FnRemoveAccentsSymbols(actTxt), type text

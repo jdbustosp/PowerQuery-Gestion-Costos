@@ -14,12 +14,16 @@ let
     FxProcesarCortes = (BinarioCortes as binary) =>
         let
             // 🚀 Excel.Workbook es más rápido que Html.Table
-            Source = try Excel.Workbook(BinarioCortes, null, true){0}[Data]
-                     otherwise Html.Table(Text.FromBinary(BinarioCortes, 1252), Columnas_HTML, [RowSelector="tr"]), 
+            Source_Raw = try Excel.Workbook(BinarioCortes, null, true){0}[Data]
+                     otherwise Html.Table(Text.FromBinary(BinarioCortes, 1252), Columnas_HTML, [RowSelector="tr"]),
+            // Estandarizar nombres de columnas
+            Source_ColNames = Table.ColumnNames(Source_Raw),
+            Source = Table.RenameColumns(Source_Raw, List.Zip({Source_ColNames, List.Transform({1..List.Count(Source_ColNames)}, each "Columna" & Text.From(_))})),
+
             AddFilaTexto = Table.AddColumn(Source, "FilaTexto", each let vals = Record.FieldValues(_), soloTexto = List.Transform(List.Select(vals, each _ <> null and _ <> ""), Text.From) in Text.Trim(Text.Combine(soloTexto, " ")), type text),
             AddOC = Table.AddColumn(AddFilaTexto, "# OC / Contrato", each let txt = [FilaTexto] in if txt <> null and Text.Contains(Text.Upper(txt), "CONTRATO NO") then let after = Text.TrimStart(Text.Replace(Text.Range(txt, Text.PositionOf(Text.Upper(txt), "CONTRATO NO") + 11), "#(00A0)", " "), {".", ":", " "}), first = Text.BeforeDelimiter(after, " "), num = Text.Select(if first = "" then after else first, {"0".."9"}) in if num = "" then null else num else null, type text),
             AddDesc = Table.AddColumn(AddOC, "Descripcion contrato", each let txt = [FilaTexto] in if txt <> null and Text.Contains(Text.Upper(txt), "CONTRATO NO") then let after = Text.TrimStart(Text.Range(txt, Text.PositionOf(Text.Upper(txt), "CONTRATO NO") + 11), {".", ":", " "}), idx = Text.PositionOfAny(after, {"A".."Z","a".."z"}), desc = if idx = -1 then null else Text.Range(after, idx), lim = if desc = null then null else if Text.Contains(Text.Upper(desc), "CONTRATISTA") then Text.BeforeDelimiter(Text.Upper(desc), "CONTRATISTA") else desc in if lim = null then null else Text.Trim(lim) else null, type text),
-            AddNombre = Table.AddColumn(AddDesc, "Nombre Contratista", each let txt = [FilaTexto] in if txt <> null and Text.Contains(Text.Upper(txt), "CONTRATISTA") then Text.Trim(Text.TrimStart(Text.AfterDelimiter(Text.Upper(txt), "CONTRATISTA"), {":"," ","-"})) else null, type text),
+            AddNombre = Table.AddColumn(AddDesc, "Nombre Contratista", each let txt = [FilaTexto] in if txt <> null and Text.Contains(Text.Upper(txt), "CONTRATISTA") then Text.Trim(Text.TrimStart(Text.AfterDelimiter(Text.Upper(txt), "CONTRATISTA"), {":","-"," "})) else null, type text),
             FillDown1 = Table.FillDown(AddNombre, {"# OC / Contrato","Descripcion contrato","Nombre Contratista"}),
             AddCodAct = Table.AddColumn(FillDown1, "CodigoAct", each let c = [Columna1], t = if c = null then null else Text.Trim(Text.From(c)) in if t <> null and t <> "" and (try Number.From(Text.Replace(t, ".", "")) otherwise null) <> null then FnFormatCodigoAct(t) else null, type text),
             AddActFuente = Table.AddColumn(AddCodAct, "ActividadFuente", each if [CodigoAct] <> null then [Columna2] else null, type text),
@@ -34,8 +38,8 @@ let
                 [Columna2] <> null and 
                 [CodigoAct] <> null and 
                 ([Columna1] = null or Text.Trim(Text.From([Columna1])) = "") and 
-                not Text.Contains(Text.Upper(Text.From([Columna1] ?? "")), "TOTAL") and
-                not Text.Contains(Text.Upper(Text.From([Columna2] ?? "")), "TOTAL")
+                not Text.Contains(Text.Upper(Text.From(if [Columna1] = null then "" else [Columna1])), "TOTAL") and
+                not Text.Contains(Text.Upper(Text.From(if [Columna2] = null then "" else [Columna2])), "TOTAL")
             ),
             
             // Creamos la clave robusta para el cruce en SINCO
@@ -78,7 +82,7 @@ let
         {"Ref.Sub", each List.First(List.RemoveNulls([Subcapitulo])), type text}
     })),
 
-    // 🔥 PREPARAMOS TBITEMS: Creamos la misma llave y extraemos su nombre oficial perfecto (con unidades) y su código.
+    // 🔥 PREPARAMOS TBITEMS
     ITEMS_Insumos_Base = Table.AddColumn(ITEMS_Clean, "InsClave_Cruce", each FnClaveLimpia([Ins]), type text),
     ITEMS_Insumos_Dist = Table.Buffer(Table.Group(ITEMS_Insumos_Base, {"Centro de Costos", "Codigo act", "InsClave_Cruce"}, {
         {"Ref.InsOficial", each List.First([Ins]), type text},
@@ -95,11 +99,11 @@ let
     ExpandedInsumos = Table.ExpandTableColumn(MergedInsumos, "INS", {"Ref.CodIns", "Ref.InsOficial"}, {"Ref.CodIns", "Ref.InsOficial"}),
 
     AddFinalCols = Table.AddColumn(ExpandedInsumos, "FinalCols", each [
-        // Si cruzó, toma el nombre OFICIAL de TbItems (Ej: "X_PROVISIONAL DE ENERGIA (GL)"). Si no, deja el de SINCO.
+        // Si cruzó, toma el nombre OFICIAL de TbItems. Si no, deja el de SINCO.
         I = if [Ref.InsOficial] <> null then [Ref.InsOficial] else (if [Columna2] = null or Text.Trim([Columna2]) = "" then "SIN DESCRIPCION" else Text.Trim([Columna2])),
         
-        A_Original = let a0 = Text.Trim(Text.From([ActividadFuente] ?? "")) in if a0 = "" then null else if [CodigoAct] <> null and not Text.StartsWith(a0, Text.From([CodigoAct])) then Text.From([CodigoAct]) & " - " & a0 else a0,
-        A = [Ref.Act] ?? A_Original
+        A_Original = let a0 = Text.Trim(Text.From(if [ActividadFuente] = null then "" else [ActividadFuente])) in if a0 = "" then null else if [CodigoAct] <> null and not Text.StartsWith(a0, Text.From([CodigoAct])) then Text.From([CodigoAct]) & " - " & a0 else a0,
+        A = if [Ref.Act] <> null then [Ref.Act] else A_Original
     ]),
     ExpandedFinal = Table.ExpandRecordColumn(AddFinalCols, "FinalCols", {"I", "A"}, {"Ins", "Actividad"}),
     

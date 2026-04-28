@@ -16,18 +16,22 @@ let
     // ============================================================
     FxProcesarCompras = (BinDetalles as binary, BinOC as binary) => let
         // 🚀 Excel.Workbook es más rápido que Html.Table
-        RawOC = try Excel.Workbook(BinOC, null, true){0}[Data]
+        RawOC_Raw = try Excel.Workbook(BinOC, null, true){0}[Data]
                 otherwise Html.Table(Text.FromBinary(Binary.Buffer(BinOC), 65001), Columnas_OC, [RowSelector="tr"]),
-        AddOCKey = Table.AddColumn(RawOC, "OC_Key_Temp", each let v = Text.From([Columna1] ?? "") in if Text.StartsWith(v, "Orden de Compra No.") then Text.Trim(Text.Replace(v, "Orden de Compra No.", "")) else null, type text),
-        Ordenes_Agrupadas = Table.RenameColumns(Table.Group(Table.SelectRows(Table.FillDown(AddOCKey, {"OC_Key_Temp"}), each [OC_Key_Temp] <> null), {"OC_Key_Temp"}, {{"Proveedor_Raw", each let l = List.RemoveNulls([Columna2]), l2 = List.Select(l, (x) => let t = Text.Trim(Text.From(x ?? "")) in t <> "Proveedor" and t <> "Insumo") in if List.IsEmpty(l2) then null else List.First(l2), type text}}), {{"OC_Key_Temp", "OC_Key"}}),
+        // Estandarizar nombres de columnas
+        RawOC_ColNames = Table.ColumnNames(RawOC_Raw),
+        RawOC = Table.RenameColumns(RawOC_Raw, List.Zip({RawOC_ColNames, List.Transform({1..List.Count(RawOC_ColNames)}, each "Columna" & Text.From(_))})),
+
+        AddOCKey = Table.AddColumn(RawOC, "OC_Key_Temp", each let v = Text.From(if [Columna1] = null then "" else [Columna1]) in if Text.StartsWith(v, "Orden de Compra No.") then Text.Trim(Text.Replace(v, "Orden de Compra No.", "")) else null, type text),
+        Ordenes_Agrupadas = Table.RenameColumns(Table.Group(Table.SelectRows(Table.FillDown(AddOCKey, {"OC_Key_Temp"}), each [OC_Key_Temp] <> null), {"OC_Key_Temp"}, {{"Proveedor_Raw", each let l = List.RemoveNulls([Columna2]), l2 = List.Select(l, (x) => let t = Text.Trim(Text.From(if x = null then "" else x)) in t <> "Proveedor" and t <> "Insumo") in if List.IsEmpty(l2) then null else List.First(l2), type text}}), {{"OC_Key_Temp", "OC_Key"}}),
 
         LibroExcel = Excel.Workbook(Binary.Buffer(BinDetalles), null, true),
         DetallesCrudos = FnPrepareTableWithHeader(LibroExcel{0}[Data]),
         Cols = Table.ColumnNames(DetallesCrudos),
         MapStd = Table.AddColumn(DetallesCrudos, "Std", each [ Codigo_ins = FnMapColumn(_, Cols, {"CÓDIGO", "CODIGO", "COD."}), Ins = FnMapColumn(_, Cols, {"INSUMO", "DESCRIPCIÓN", "DESCRIPCION"}), Act = FnMapColumn(_, Cols, {"ACTIVIDAD", "DESTINO", "FRENTE", "ITEM", "ÍTEM"}), Cant = FnMapColumn(_, Cols, {"CANTIDAD", "CANT."}), VU_Crudo = try Record.FieldValues(_){10} otherwise FnMapColumn(_, Cols, {"VALOR UNITARIO", "VLR UNIT", "UNITARIO"}), IVA_Crudo = try Record.FieldValues(_){11} otherwise FnMapColumn(_, Cols, {"IVA %", "IVA", "% IVA"}), VT = try Record.FieldValues(_){12} otherwise FnMapColumn(_, Cols, {"VALOR TOTAL", "VLR TOTAL", "TOTAL"}), OC = FnMapColumn(_, Cols, {"ORDEN", "PEDIDO", "O.C"}) ]),
         DetallesStd = Table.ExpandRecordColumn(MapStd, "Std", {"Codigo_ins", "Ins", "Act", "Cant", "VT", "VU_Crudo", "IVA_Crudo", "OC"}, {"Codigo ins", "Ins", "Actividad", "Cantidad Comprado", "VT Comprado", "VU_Crudo", "IVA_Crudo", "# OC / Contrato"}),
-        DetConKeyOC = Table.AddColumn(DetallesStd, "OC_Key", each Text.Trim(Text.From([#"# OC / Contrato"] ?? "")), type text),
-        DetConCodAct = Table.AddColumn(DetConKeyOC, "Codigo act", each let c = Text.Trim(Text.BeforeDelimiter(Text.Trim(Text.From([Actividad] ?? "")), "-", 0)) in if c = "" then null else c, type text),
+        DetConKeyOC = Table.AddColumn(DetallesStd, "OC_Key", each Text.Trim(Text.From(if [#"# OC / Contrato"] = null then "" else [#"# OC / Contrato"])), type text),
+        DetConCodAct = Table.AddColumn(DetConKeyOC, "Codigo act", each let c = Text.Trim(Text.BeforeDelimiter(Text.Trim(Text.From(if [Actividad] = null then "" else [Actividad])), "-", 0)) in if c = "" then null else c, type text),
         DetConClave = Table.AddColumn(DetConCodAct, "InsClave", each FxClaveTexto([Ins]), type text),
         MergedOC = Table.NestedJoin(DetConClave, {"OC_Key"}, Ordenes_Agrupadas, {"OC_Key"}, "ORD", JoinKind.LeftOuter),
         ExpandedOC = Table.ExpandTableColumn(MergedOC, "ORD", {"Proveedor_Raw"}, {"Proveedor_Raw"}),
@@ -98,15 +102,15 @@ let
     AddedCoalesced = Table.AddColumn(ExpandedGenerico, "FinalCols", each 
         let 
             e = [Ex.Ins] <> null, 
-            ca = if e then [Codigo act] else ([Rs.Codigo act] ?? [Codigo act]), 
-            a0 = Text.Trim(Text.From([Actividad] ?? "")), 
+            ca = if e then [Codigo act] else (if [Rs.Codigo act] <> null then [Rs.Codigo act] else [Codigo act]), 
+            a0 = Text.Trim(Text.From(if [Actividad] = null then "" else [Actividad])), 
             aOrig = if a0 = "" then null else if ca <> null and not Text.StartsWith(a0, Text.From(ca)) then Text.From(ca) & " - " & a0 else a0,
             
-            ActOficial = [Act_Estricto] ?? [Act_Gen] ?? aOrig,
-            CapFinal = [Cap_Estricto] ?? [Cap_Gen],
-            SubCapFinal = [Sub_Estricto] ?? [Sub_Gen]
+            ActOficial = if [Act_Estricto] <> null then [Act_Estricto] else if [Act_Gen] <> null then [Act_Gen] else aOrig,
+            CapFinal = if [Cap_Estricto] <> null then [Cap_Estricto] else [Cap_Gen],
+            SubCapFinal = if [Sub_Estricto] <> null then [Sub_Estricto] else [Sub_Gen]
         in [ 
-            InsFinal = if e then [Ex.Ins] else ([Rs.Ins] ?? [Ins]), 
+            InsFinal = if e then [Ex.Ins] else (if [Rs.Ins] <> null then [Rs.Ins] else [Ins]), 
             CodActFinal = ca, 
             ActFinal = ActOficial, 
             CapFinal = CapFinal, 

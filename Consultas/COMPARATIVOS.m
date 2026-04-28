@@ -20,7 +20,7 @@ let
         "Codigo act", 
         each 
             let
-                txt = Text.Trim(Text.From([Actividad] ?? "")),
+                txt = Text.Trim(Text.From(if [Actividad] = null then "" else [Actividad])),
                 cod = Text.BeforeDelimiter(txt, "-", 0)
             in 
                 if txt = "" then null else FnFormatCodigoAct(cod), 

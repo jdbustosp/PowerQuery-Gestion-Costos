@@ -68,7 +68,7 @@ let
 
     Bloques_Merge = Table.NestedJoin(PPTO_Grouped_Buffer, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "Ins_Oficial"}, Adj_Grouped_Buffer, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "Ins"}, "AdjTot", JoinKind.LeftOuter),
     Bloques_ExpandedAdj = Table.ExpandTableColumn(Bloques_Merge, "AdjTot", {"ValorAdjudicado_Bloque", "CantAdjudicada_Bloque"}, {"ValorAdjudicado_Bloque", "CantAdjudicada_Bloque"}),
-    Bloques_Filled = Table.TransformColumns(Bloques_ExpandedAdj, {{"ValorTotal_PPTO_Bloque", each _ ?? 0, type number}, {"Unitario_PPTO_Bloque", each _ ?? 0, type number}, {"ValorAdjudicado_Bloque", each _ ?? 0, type number}, {"CantAdjudicada_Bloque", each _ ?? 0, type number}}),
+    Bloques_Filled = Table.TransformColumns(Bloques_ExpandedAdj, {{"ValorTotal_PPTO_Bloque", each if _ = null then 0 else _, type number}, {"Unitario_PPTO_Bloque", each if _ = null then 0 else _, type number}, {"ValorAdjudicado_Bloque", each if _ = null then 0 else _, type number}, {"CantAdjudicada_Bloque", each if _ = null then 0 else _, type number}}),
     
     // Hallamos el valor pendiente real
     Bloques_WithSaldoValor = Table.AddColumn(Bloques_Filled, "Pendiente_Valor", each [ValorTotal_PPTO_Bloque] - [ValorAdjudicado_Bloque], type number),

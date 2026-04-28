@@ -15,6 +15,6 @@ let
     Filtered = Table.SelectRows(AddTipo, each [VT Presupuesto] <> null and [VT Presupuesto] <> 0),
     
     Typed = Table.TransformColumnTypes(Filtered,{{"Centro de Costos", type text}, {"Codigo ins", Int64.Type}, {"Cantidad Presupuesto", type number}, {"VT Presupuesto", Currency.Type}, {"V/U Presupuesto", Currency.Type}, {"Tipo", type text}}),
-    TablaEnMemoria = Typed
+    TablaEnMemoria = Table.Buffer(Typed)
 in 
     TablaEnMemoria
