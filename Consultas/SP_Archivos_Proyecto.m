@@ -2,30 +2,38 @@ let
     // =========================================================
     // 🔥 CONSULTA MAESTRA DE SHAREPOINT (UNA SOLA LLAMADA)
     // =========================================================
-    // Esta consulta se ejecuta UNA sola vez y todas las demás
-    // consultas (COMPRAS, CONTRATOS, PPTO_BD, ITEMSINSUMOS,
-    // DESCUENTOS) la leen directamente desde memoria.
-    // =========================================================
     ParamProyecto = Text.Trim(ProyectoActual),
     RutaBase = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
     ArchivosSharePoint = SharePoint.Files(RutaBase, [ApiVersion = 15]),
 
-    // Filtro general: solo archivos del proyecto actual, en carpetas /Actual/
-    ArchivosProyecto = Table.SelectRows(ArchivosSharePoint, each 
+    // 🔥 PASO 1: Reducir columnas ANTES de filtrar (libera RAM desde el inicio)
+    SoloColumnasNecesarias = Table.SelectColumns(ArchivosSharePoint, {"Name", "Content", "Folder Path"}),
+
+    // 🔥 PASO 2: Filtro por proyecto y /Actual/
+    ArchivosProyecto = Table.SelectRows(SoloColumnasNecesarias, each 
         Text.Contains([Folder Path], "/" & ParamProyecto & "/", Comparer.OrdinalIgnoreCase) and 
         Text.EndsWith([Folder Path], "/Actual/", Comparer.OrdinalIgnoreCase) and 
         not Text.StartsWith([Name], "~$")
     ),
 
-    // Extraemos el Centro de Costos de la ruta
-    ConCentroCosto = Table.AddColumn(ArchivosProyecto, "Centro de Costos", each 
+    // 🔥 PASO 3: Pre-filtrar SOLO los archivos que realmente usamos
+    // Esto evita que Table.Buffer guarde archivos irrelevantes
+    ArchivosRelevantes = Table.SelectRows(ArchivosProyecto, each 
+        Text.Contains([Name], "SEGUIMIENTO POR ITEMS", Comparer.OrdinalIgnoreCase) or
+        Text.Contains([Name], "ANALISIS DE PRECIOS UNITARIOS", Comparer.OrdinalIgnoreCase) or
+        Text.Contains([Name], "INFORMEORDEN", Comparer.OrdinalIgnoreCase) or
+        Text.Contains([Name], "ESTADO DE ORDENES", Comparer.OrdinalIgnoreCase) or
+        Text.Contains([Name], "ESTADO DE CONTRATOS", Comparer.OrdinalIgnoreCase) or
+        Text.Contains([Name], "DESCUENTOS", Comparer.OrdinalIgnoreCase)
+    ),
+
+    // PASO 4: Extraemos el Centro de Costos de la ruta
+    ConCentroCosto = Table.AddColumn(ArchivosRelevantes, "Centro de Costos", each 
         Text.Trim(Text.Replace(Text.AfterDelimiter([Folder Path], "/" & ParamProyecto & "/"), "/Actual/", ""))
     ),
 
-    // Solo conservamos las columnas que necesitamos (libera RAM)
+    // PASO 5: Eliminamos Folder Path (ya no la necesitamos) y bufferizamos
     ColumnasMinimas = Table.SelectColumns(ConCentroCosto, {"Name", "Content", "Centro de Costos"}),
-
-    // Materializamos una sola vez para que las 4+ consultas lean de la misma tabla en memoria
     TablaFinal = Table.Buffer(ColumnasMinimas)
 in
     TablaFinal

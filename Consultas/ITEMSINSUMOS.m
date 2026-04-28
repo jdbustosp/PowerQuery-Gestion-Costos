@@ -6,7 +6,7 @@ let
     FnParseNumber = F_Globales[FxToNumberFlex],
     FnRemoveAccentsSymbols = F_Globales[FnRemoveAccentsSymbols],
     FnPrepareTableWithHeader = F_Globales[FnPrepareTableWithHeader],
-    Columnas_HTML = List.Transform({1..40}, each {"Columna " & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}),
+    Columnas_HTML = List.Transform({1..25}, each {"Columna " & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}),
 
     // =========================================================
     // FUNCIÓN MÁGICA
