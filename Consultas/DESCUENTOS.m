@@ -58,7 +58,7 @@ let
     }, null, MissingField.Ignore),
     ContratosPorOC = Table.Buffer(Table.Group(CONTRATOS_Clean, {"# OC / Contrato"}, {{"Nombre Contratista", each List.First([Nombre Contratista]), type text}, {"Descripcion contrato", each List.First([Descripcion contrato]), type text}})),
 
-    SourceItems = try Excel.CurrentWorkbook(){[Name="TbItems"]}[Content] otherwise ITEMSINSUMOS,
+    SourceItems = ITEMSINSUMOS,
     ITEMS_Clean = Table.TransformColumns(SourceItems, {
         {"Codigo act", each FnFormatCodigoAct(_), type text}
     }, null, MissingField.Ignore),

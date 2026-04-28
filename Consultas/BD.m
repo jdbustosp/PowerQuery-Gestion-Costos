@@ -2,7 +2,7 @@ let
     Tol = 0.01,
 
     // 🔥 MODO CASCADA: Conexión directa a las consultas en memoria.
-    T_Items_Raw = Excel.CurrentWorkbook(){[Name="TbItems"]}[Content],
+    T_Items_Raw = ITEMSINSUMOS,
     T_Items = if Table.HasColumns(T_Items_Raw, "Tipo") then T_Items_Raw else Table.AddColumn(T_Items_Raw, "Tipo", each "ITEMS", type text),
 
     T_Compras = COMPRAS,

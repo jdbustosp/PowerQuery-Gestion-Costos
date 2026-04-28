@@ -54,9 +54,9 @@ let
     Compras_Unicas = Table.Buffer(Table.Distinct(Expandido_Clean)),
 
     // ============================================================
-    // LECTURA DIRECTA A EXCEL (MAESTROS LOCALES - 🔥 MODO ESTRICTO)
+    // LECTURA DIRECTA DE CONSULTAS (Memoria)
     // ============================================================
-    ITEMS_TablaLocal = Excel.CurrentWorkbook(){[Name="TbItems"]}[Content],
+    ITEMS_TablaLocal = ITEMSINSUMOS,
     ITEMS_Clean = Table.TransformColumns(ITEMS_TablaLocal, {
         {"Centro de Costos", each if _ = null then null else Text.Upper(Text.Trim(Text.From(_))), type text},
         {"Codigo act", each FnFormatCodigoAct(_), type text}

@@ -72,9 +72,9 @@ let
     Expandido_Unico = Table.Buffer(Table.Distinct(Expandido_Clean)),
 
     // ============================================================
-    // 4. LECTURA DE LA HOJA LOCAL EXCEL (EL DICCIONARIO OFICIAL)
+    // 4. LECTURA DE LA CONSULTA MAESTRA (EL DICCIONARIO OFICIAL)
     // ============================================================
-    ITEMS_Raw = try Excel.CurrentWorkbook(){[Name="TbItems"]}[Content] otherwise Table.Buffer(ITEMSINSUMOS),
+    ITEMS_Raw = ITEMSINSUMOS,
     
     ITEMS_Clean = Table.Buffer(Table.TransformColumns(ITEMS_Raw, {
         {"Centro de Costos", each if _ = null then null else Text.Upper(Text.Trim(Text.From(_))), type text},
