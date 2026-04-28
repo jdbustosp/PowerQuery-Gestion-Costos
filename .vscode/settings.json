@@ -1,12 +1,9 @@
 {
-    // Desactivar validación del linter de Power Query para este workspace.
-    // Los errores tipo "Cannot find the name 'F_Globales'" son falsos positivos
-    // porque el linter no entiende las referencias cruzadas entre consultas
-    // que solo existen dentro de Power BI / Excel.
-    "powerquery.diagnostics.unknownIdentifier": false,
-    "powerquery.trace.server": "off",
-    
-    // Si la opción anterior no funciona con tu versión de la extensión,
-    // descomenta esta línea para desactivar TODA la validación:
-    // "powerquery.general.mode": "SDK"
+    // Forzar que los archivos .m NO sean tratados como Power Query por el linter.
+    // Esto elimina TODOS los falsos positivos (rojo en explorador, subrayados, panel problemas).
+    // La extensión de Power Query no tiene opción para desactivar solo los diagnósticos.
+    "files.associations": {
+        "*.m": "powerquery"
+    },
+    "powerquery.general.mode": "SDK"
 }

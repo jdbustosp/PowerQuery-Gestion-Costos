@@ -52,10 +52,11 @@ let
     ArchivosProyecto = Table.SelectRows(SP_Archivos_Proyecto, each 
         Text.Contains([Name], "ESTADO DE CONTRATOS", Comparer.OrdinalIgnoreCase)
     ),
-    ConCentroCosto = ArchivosProyecto,
     
-    TablaConDatos = Table.AddColumn(ConCentroCosto, "Datos", each FxProcesarCortes([Content])),
-    SoloDatos = Table.SelectColumns(TablaConDatos, {"Centro de Costos", "Datos"}),
+    // 🚀 Agrupar por CC y bufferear el binario (mismo patrón que DESCUENTOS)
+    Agrupado = Table.Group(ArchivosProyecto, {"Centro de Costos"}, {{"Binario", each Binary.Buffer(_{0}[Content])}}),
+    TablaConDatos = Table.AddColumn(Agrupado, "Datos", each FxProcesarCortes([Binario])),
+    SoloDatos = Table.RemoveColumns(TablaConDatos, {"Binario"}),
     
     Expandido = Table.ExpandTableColumn(SoloDatos, "Datos", {"# OC / Contrato", "Descripcion contrato", "Nombre Contratista", "CodigoAct", "ActividadFuente", "Cantidades contrato", "VT contrato", "Cantidad Cortes", "VT Cortes", "Columna2", "InsClave_Cruce"}),
     

@@ -27,12 +27,19 @@ let
 
     FiltroTipoValido = Table.SelectRows(LlavesLimpias, each [Tipo] <> null and [Tipo] <> ""),
 
-    MapaClasificadores = Table.Distinct(Table.SelectRows(Table.SelectColumns(FiltroTipoValido, {"Centro de Costos", "Codigo act", "Ins", "Clasificador"}), each [Clasificador] <> null and Text.Trim(Text.From([Clasificador])) <> ""), {"Centro de Costos", "Codigo act", "Ins"}),
-    CruceClasificador = Table.NestedJoin(FiltroTipoValido, {"Centro de Costos", "Codigo act", "Ins"}, MapaClasificadores, {"Centro de Costos", "Codigo act", "Ins"}, "MapaC", JoinKind.LeftOuter),
-    ExpandirClasificador = Table.ExpandTableColumn(CruceClasificador, "MapaC", {"Clasificador"}, {"Clasificador_Oficial"}),
-
-    BaseSinClasificadorViejo = Table.RemoveColumns(ExpandirClasificador, {"Clasificador"}),
-    BaseClasificada = Table.RenameColumns(BaseSinClasificadorViejo, {{"Clasificador_Oficial", "Clasificador"}}),
+    // 🚀 Lookup por Record para Clasificadores (O(1) por fila en vez de JOIN O(N))
+    ClasificadorRows = Table.SelectRows(
+        Table.Distinct(
+            Table.SelectColumns(FiltroTipoValido, {"Centro de Costos", "Codigo act", "Ins", "Clasificador"}),
+            {"Centro de Costos", "Codigo act", "Ins"}
+        ),
+        each [Clasificador] <> null and Text.Trim(Text.From([Clasificador])) <> ""
+    ),
+    ClasificadorKeys = List.Transform(Table.ToRecords(Table.SelectColumns(ClasificadorRows, {"Centro de Costos", "Codigo act", "Ins"})), each [Centro de Costos] & "|" & [Codigo act] & "|" & [Ins]),
+    ClasificadorMap = Record.FromList(ClasificadorRows[Clasificador], ClasificadorKeys),
+    BaseClasificada = Table.AddColumn(Table.RemoveColumns(FiltroTipoValido, {"Clasificador"}, MissingField.Ignore), "Clasificador", each 
+        let key = [Centro de Costos] & "|" & [Codigo act] & "|" & [Ins]
+        in try Record.Field(ClasificadorMap, key) otherwise null, type text),
 
     NumCols = {"Cantidad Proyectado", "VT Proyectado", "Cantidad Consumido", "VT Consumido", "Cantidad Comprado", "V/U Comprado", "VT Comprado", "Cantidad Contratado", "V/U Contratado", "VT Contratado", "Cantidad Presupuesto", "V/U Presupuesto", "VT Presupuesto", "Cant. aprobacion", "V/U aprobacion", "VR total aprobacion", "Valor Total ppto (CC)", "Cantidad Cortes", "VT Cortes", "Valor descuento", "Cantidad_Calc", "V/U ppto (CC)"},
     NumerosSeguros = Table.TransformColumns(BaseClasificada, List.Transform(NumCols, each {_, (v) => let n = try Number.From(v) otherwise 0 in if n = null then 0 else n, type number}), null, MissingField.Ignore),
@@ -69,7 +76,10 @@ let
     
     ExpandirBanderas = Table.ExpandRecordColumn(ResumenEscenarios, "Motor", {"Esc1", "Esc3", "Esc2", "Esc4", "Esc5"}),
 
-    CruceConBase = Table.NestedJoin(AddVUAseg, {"Centro de Costos", "Codigo act", "Ins"}, ExpandirBanderas, {"Centro de Costos", "Codigo act", "Ins"}, "B", JoinKind.Inner),
+    // 🚀 Buffer las banderas para acelerar el JOIN de escenarios
+    BanderasBuffer = Table.Buffer(Table.SelectColumns(ExpandirBanderas, {"Centro de Costos", "Codigo act", "Ins", "Esc1", "Esc2", "Esc3", "Esc4", "Esc5"})),
+
+    CruceConBase = Table.NestedJoin(AddVUAseg, {"Centro de Costos", "Codigo act", "Ins"}, BanderasBuffer, {"Centro de Costos", "Codigo act", "Ins"}, "B", JoinKind.Inner),
     BaseConBanderas = Table.ExpandTableColumn(CruceConBase, "B", {"Esc1", "Esc3", "Esc2", "Esc4", "Esc5"}),
 
     // LA REGLA DE APLICACIÓN: Orden de prioridad estricto

@@ -40,15 +40,16 @@ let
         Text.Contains([FileName], "DESCUENTOS", Comparer.OrdinalIgnoreCase))
     ),
 
-    // PASO 5: Descargar contenido de cada archivo
+    // PASO 5: Descargar contenido y almacenar en memoria (Binary.Buffer evita re-descargas)
     WithContent = Table.AddColumn(Relevant, "Content", each
-        Web.Contents(SiteUrl & "/_api/web/GetFileByServerRelativeUrl('" & FnEncode([ServerRelativeUrl]) & "')/$value")
+        Binary.Buffer(Web.Contents(SiteUrl & "/_api/web/GetFileByServerRelativeUrl('" & FnEncode([ServerRelativeUrl]) & "')/$value"))
     ),
 
-    // PASO 6: Limpiar columnas (SIN Table.Buffer - los binarios se descargan bajo demanda)
-    Final = Table.RenameColumns(
+    // PASO 6: Table.Buffer materializa TODO el resultado para que CONTRATOS, COMPRAS,
+    // DESCUENTOS y SP_Seguimiento_Parsed NO re-disparen las llamadas HTTP
+    Final = Table.Buffer(Table.RenameColumns(
         Table.SelectColumns(WithContent, {"Name", "FileName", "Content"}),
         {{"Name", "Centro de Costos"}, {"FileName", "Name"}}
-    )
+    ))
 in
     Final

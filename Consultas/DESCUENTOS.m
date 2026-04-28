@@ -57,7 +57,8 @@ let
     CONTRATOS_Clean = Table.TransformColumns(SourceContratos, {
         {"# OC / Contrato", each if _ = null then null else Text.Trim(Text.From(_)), type text}
     }, null, MissingField.Ignore),
-    ContratosPorOC = Table.Group(CONTRATOS_Clean, {"# OC / Contrato"}, {{"Nombre Contratista", each List.First([Nombre Contratista]), type text}, {"Descripcion contrato", each List.First([Descripcion contrato]), type text}}),
+    // 🚀 Buffer para que el JOIN no re-evalúe toda la cadena de CONTRATOS
+    ContratosPorOC = Table.Buffer(Table.Group(CONTRATOS_Clean, {"# OC / Contrato"}, {{"Nombre Contratista", each List.First([Nombre Contratista]), type text}, {"Descripcion contrato", each List.First([Descripcion contrato]), type text}})),
 
     SourceItems = ITEMSINSUMOS,
     ITEMS_Clean = Table.TransformColumns(SourceItems, {

@@ -54,6 +54,9 @@ let
                 t3 = Text.Select(t2, {"A".."Z", "0".."9"})
             in if t3 = "" then null else t3,
 
+        FnCleanText = (t as any) as nullable text =>
+            if t = null then null else let txt = Text.Trim(Text.From(t)) in if txt = "" then null else Text.Upper(txt),
+
         FnPrepareTableWithHeader = (tbl as table) as table => 
             let 
                 firstColName = Table.ColumnNames(tbl){0}, 

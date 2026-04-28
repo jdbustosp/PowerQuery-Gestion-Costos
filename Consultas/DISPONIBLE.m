@@ -1,11 +1,9 @@
 let
     // ============================================================
-    // 1. FUNCIONES DE LIMPIEZA EXTREMA
+    // 1. FUNCIONES DE LIMPIEZA (Centralizadas desde F_Globales)
     // ============================================================
-    // FnCleanText: Quita espacios fantasma, convierte a mayúsculas y vuelve los vacíos ("") en null reales.
-    FnCleanText = (t as any) as nullable text => if t = null then null else let txt = Text.Trim(Text.From(t)) in if txt = "" then null else Text.Upper(txt),
-    
-    FnRemoveAccentsSymbols = (t as nullable text) as nullable text => let cleanT = FnCleanText(t) in if cleanT = null then null else let replacements = {{"Á","A"},{"É","E"},{"Í","I"},{"Ó","O"},{"Ú","U"},{"º",""},{"°",""},{"¨",""}}, result = List.Accumulate(replacements, cleanT, (state, current) => Text.Replace(state, current{0}, current{1})) in result,
+    FnCleanText = F_Globales[FnCleanText],
+    FnRemoveAccentsSymbols = F_Globales[FnRemoveAccentsSymbols],
 
     // ============================================================
     // 2. LECTURA DE BASES (Conexión Directa en Memoria)

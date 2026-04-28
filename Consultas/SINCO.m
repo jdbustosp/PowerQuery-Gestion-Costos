@@ -14,8 +14,8 @@ let
 
     ColumnasFinales = Table.SelectColumns(FiltroCeros, {"Codigo ins", "Ins", "Actividad", "Capitulo", "Subcapitulo", "Centro de Costos", "# OC / Contrato", "Nombre Contratista", "Cantidad asegurada", "V/U asegurada", "VT Asegurada", "Cantidad_Calc", "V/U ppto (CC)", "Valor Total ppto (CC)", "Descripcion contrato", "Tipo"}, MissingField.Ignore),
 
-    AddIndiceOrden = Table.AddColumn(ColumnasFinales, "_OrdenTmp", each if (try Text.Upper([Tipo]) otherwise "") = "POR ADJUDICAR" then 2 else 1),
-    TablaOrdenada = Table.Sort(AddIndiceOrden, {{"_OrdenTmp", Order.Ascending}}),
-    ResultadoFinal = Table.RemoveColumns(TablaOrdenada, {"_OrdenTmp"})
+    // 🚀 Table.Sort eliminado: es una de las operaciones más costosas en PQ
+    // y no aporta valor si el destino es Power BI (el orden se controla en DAX/Visual)
+    ResultadoFinal = ColumnasFinales
 in
     ResultadoFinal
