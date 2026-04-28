@@ -1,16 +1,16 @@
 let
     Tol = 0.01,
 
-    // 🔥 MODO ESTRICTO: Carga 100% local. Sin descargas en segundo plano.
+    // 🔥 MODO CASCADA: Conexión directa a las consultas en memoria.
     T_Items_Raw = Excel.CurrentWorkbook(){[Name="TbItems"]}[Content],
     T_Items = if Table.HasColumns(T_Items_Raw, "Tipo") then T_Items_Raw else Table.AddColumn(T_Items_Raw, "Tipo", each "ITEMS", type text),
 
-    T_Compras = Excel.CurrentWorkbook(){[Name="COMPRAS"]}[Content],
-    T_Contratos = Excel.CurrentWorkbook(){[Name="CONTRATOS"]}[Content],
-    T_Ppto = Excel.CurrentWorkbook(){[Name="PPTO_BD"]}[Content],
-    T_Comp = Excel.CurrentWorkbook(){[Name="COMPARATIVOS"]}[Content],
-    T_Desc = Excel.CurrentWorkbook(){[Name="DESCUENTOS"]}[Content],
-    T_Disp = Excel.CurrentWorkbook(){[Name="DISPONIBLE"]}[Content],
+    T_Compras = COMPRAS,
+    T_Contratos = CONTRATOS,
+    T_Ppto = PPTO_BD,
+    T_Comp = COMPARATIVOS,
+    T_Desc = DESCUENTOS,
+    T_Disp = DISPONIBLE,
 
     Origen = Table.Combine({T_Items, T_Compras, T_Contratos, T_Ppto, T_Comp, T_Desc, T_Disp}),
 

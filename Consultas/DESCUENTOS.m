@@ -50,9 +50,9 @@ let
     BaseDescuentos_EnMemoria = Table.Buffer(Descuentos_Clean),
 
     // ============================================================
-    // LECTURA DIRECTA A EXCEL
+    // LECTURA DIRECTA DE CONSULTAS (Memoria)
     // ============================================================
-    SourceContratos = try Excel.CurrentWorkbook(){[Name="CONTRATOS"]}[Content] otherwise CONTRATOS,
+    SourceContratos = CONTRATOS,
     CONTRATOS_Clean = Table.TransformColumns(SourceContratos, {
         {"# OC / Contrato", each if _ = null then null else Text.Trim(Text.From(_)), type text}
     }, null, MissingField.Ignore),

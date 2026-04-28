@@ -8,10 +8,10 @@ let
     FnRemoveAccentsSymbols = (t as nullable text) as nullable text => let cleanT = FnCleanText(t) in if cleanT = null then null else let replacements = {{"Á","A"},{"É","E"},{"Í","I"},{"Ó","O"},{"Ú","U"},{"º",""},{"°",""},{"¨",""}}, result = List.Accumulate(replacements, cleanT, (state, current) => Text.Replace(state, current{0}, current{1})) in result,
 
     // ============================================================
-    // 2. LECTURA DE BASES
+    // 2. LECTURA DE BASES (Conexión Directa en Memoria)
     // ============================================================
-    FuentePPTO  = Excel.CurrentWorkbook(){[Name="PPTO_BD"]}[Content],
-    FuenteDetCC = Excel.CurrentWorkbook(){[Name="COMPARATIVOS"]}[Content],
+    FuentePPTO  = PPTO_BD,
+    FuenteDetCC = COMPARATIVOS,
 
     // ============================================================
     // 3. PROCESAMIENTO PPTO (Con escudo anti-errores de texto)

@@ -1,7 +1,7 @@
 let
-    // 🔥 MODO ESTRICTO: Carga local.
+    // 🔥 CONEXIÓN DIRECTA EN CASCADA
     Source = BD, 
-    TablaComparativo = Table.Buffer(Excel.CurrentWorkbook(){[Name="COMPARATIVOS"]}[Content]),
+    TablaComparativo = COMPARATIVOS,
 
     ListaOC_Excluir = List.Distinct(List.RemoveNulls(List.Transform(try TablaComparativo[#"# OC / Contrato"] otherwise {}, each if _ = null or Text.Trim(Text.From(_)) = "" then null else Text.Trim(Text.From(_))))),
 
