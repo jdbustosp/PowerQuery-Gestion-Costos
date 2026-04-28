@@ -38,9 +38,11 @@ let
     // ============================================================
     RutaBase = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
     Raiz = SharePoint.Contents(RutaBase, [ApiVersion = 15]),
-    CarpetaDocs = try Raiz{[Name="Documentos Compartidos"]}[Content] otherwise Raiz{[Name="Documentos"]}[Content],
+    CarpetaDocs = Raiz{[Name="Departamento Tecnico"]}[Content],
+    CarpetaCoord = CarpetaDocs{[Name="COORDINACION DE PRESUPUESTOS"]}[Content],
+    CarpetaReportes = CarpetaCoord{[Name="Reportes EDT"]}[Content],
     ParamProyecto = Text.Trim(ProyectoActual),
-    CarpetaProyecto = CarpetaDocs{[Name=ParamProyecto]}[Content],
+    CarpetaProyecto = CarpetaReportes{[Name=ParamProyecto]}[Content],
     CentrosDeCosto = Table.SelectRows(CarpetaProyecto, each [Attributes]?[Kind]? = "Folder"),
     AddCarpetaActual = Table.AddColumn(CentrosDeCosto, "ArchivosActual", each try [Content]{[Name="Actual"]}[Content] otherwise null),
     ConCarpetaActual = Table.SelectRows(AddCarpetaActual, each [ArchivosActual] <> null),
