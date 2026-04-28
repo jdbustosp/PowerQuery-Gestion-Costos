@@ -45,11 +45,10 @@ let
         Web.Contents(SiteUrl & "/_api/web/GetFileByServerRelativeUrl('" & FnEncode([ServerRelativeUrl]) & "')/$value")
     ),
 
-    // PASO 6: Limpiar columnas
+    // PASO 6: Limpiar columnas (SIN Table.Buffer - los binarios se descargan bajo demanda)
     Final = Table.RenameColumns(
         Table.SelectColumns(WithContent, {"Name", "FileName", "Content"}),
         {{"Name", "Centro de Costos"}, {"FileName", "Name"}}
-    ),
-    TablaFinal = Table.Buffer(Final)
+    )
 in
-    TablaFinal
+    Final
