@@ -22,7 +22,7 @@ let
 
     // Abrir el libro y buscar la tabla DESCARGAS
     Libro = Excel.Workbook(BinarioArchivo, null, true),
-    TablaDescargas = Libro{[Item="DESCARGAS", Kind="Table"]}[Data],
+    TablaDescargas = Libro{[Item="DESCARGA", Kind="Table"]}[Data],
 
     // ============================================================
     // FILTRAR POR PROYECTO ACTUAL
@@ -46,7 +46,7 @@ let
         {"# CC", each if _ = null then null else Text.Trim(Text.From(_)), type text},
         {"Comparativo", each if _ = null then null else Text.Trim(Text.From(_)), type text},
 
-        {"Cantidad ppto (CC)", each FxToNumberFlex(_), type number},
+        {"Cantidad", each FxToNumberFlex(_), type number},
         {"V/U ppto (CC)", each FxToNumberFlex(_), type number},
         {"Valor Total ppto (CC)", each FxToNumberFlex(_), type number}
     }, null, MissingField.Ignore),
@@ -58,7 +58,7 @@ let
     // ============================================================
     TablaFinal = Table.SelectColumns(TiposFinales, 
         {"Proyecto", "Centro de Costos", "Subcapitulo", "Capitulo", "Actividad", "Codigo ins", "Ins", 
-         "Cantidad ppto (CC)", "V/U ppto (CC)", "Valor Total ppto (CC)", 
+         "Cantidad", "V/U ppto (CC)", "Valor Total ppto (CC)", 
          "# CC - Comparativo", "# CC", "Comparativo"}, MissingField.Ignore)
 in
     TablaFinal
