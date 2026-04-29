@@ -206,15 +206,15 @@ let
     // Selección y orden final de columnas (sin Codigo act, sin Tipo)
     Selected = Table.SelectColumns(Filtered, 
         {"Proyecto", "Centro de Costos", "Subcapitulo", "Capitulo", "Actividad", "Codigo ins", "Ins", 
-         "Cantidad Presupuesto", "VT Presupuesto", "V/U Presupuesto"}),
+         "Cantidad Presupuesto", "V/U Presupuesto", "VT Presupuesto"}),
 
     // Tipos de datos finales
     Typed = Table.TransformColumnTypes(Selected, {
         {"Proyecto", type text}, {"Centro de Costos", type text}, 
         {"Subcapitulo", type text}, {"Capitulo", type text}, {"Actividad", type text},
         {"Codigo ins", Int64.Type}, {"Ins", type text},
-        {"Cantidad Presupuesto", type number}, {"VT Presupuesto", Currency.Type}, 
-        {"V/U Presupuesto", Currency.Type}
+        {"Cantidad Presupuesto", type number}, {"V/U Presupuesto", Currency.Type},
+        {"VT Presupuesto", Currency.Type}
     }),
 
     TablaFinal = Typed
