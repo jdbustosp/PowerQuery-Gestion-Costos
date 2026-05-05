@@ -7,10 +7,10 @@ let
 
     // ============================================================
     // CONEXIÓN A SHAREPOINT: Archivo "Descarga ppto"
-    // Ruta: /Departamento Tecnico/COORDINACION DE PRESUPUESTOS/Descargas pptos/
+    // Ruta: /Departamento Tecnico/COORDINACION DE PRESUPUESTOS/0. Descargas pptos - Control costos interno/
     // ============================================================
     SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
-    FilePath = "/sites/MiGerenciaViv/Departamento Tecnico/COORDINACION DE PRESUPUESTOS/Descargas pptos/Descarga ppto.xlsx",
+    FilePath = "/sites/MiGerenciaViv/Departamento Tecnico/COORDINACION DE PRESUPUESTOS/0. Descargas pptos - Control costos interno/Descarga ppto.xlsx",
     
     FnEncode = (path as text) as text => 
         Text.Combine(List.Transform(Text.Split(path, "/"), each Uri.EscapeDataString(_)), "/"),

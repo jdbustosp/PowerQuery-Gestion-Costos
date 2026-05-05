@@ -4,7 +4,7 @@ let
     // =========================================================
     ParamProyecto = Text.Trim(ProyectoActual),
     SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
-    BasePath = "/sites/MiGerenciaViv/Departamento Tecnico/COORDINACION DE PRESUPUESTOS/Reportes EDT/" & ParamProyecto,
+    BasePath = "/sites/MiGerenciaViv/Departamento Tecnico/COORDINACION DE PRESUPUESTOS/0. Reportes EDT - Control costos interno/" & ParamProyecto,
     Headers = [Accept="application/json;odata=nometadata"],
 
     // Codificar ruta para URL (solo espacios, que es lo más común)

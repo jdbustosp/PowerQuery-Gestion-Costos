@@ -12,7 +12,7 @@ let
     // API REST DE SHAREPOINT (TODOS LOS PROYECTOS)
     // =========================================================
     SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
-    BasePath = "/sites/MiGerenciaViv/Departamento Tecnico/COORDINACION DE PRESUPUESTOS/Reportes EDT",
+    BasePath = "/sites/MiGerenciaViv/Departamento Tecnico/COORDINACION DE PRESUPUESTOS/0. Reportes EDT - Control costos interno",
     Headers = [Accept="application/json;odata=nometadata"],
 
     FnEncode = (path as text) as text => 
