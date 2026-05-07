@@ -64,7 +64,11 @@ let
                 headerFlags = List.Transform(firstColValues, (x) => let txt = Text.Upper(if x = null then "" else Text.From(x)), txtNorm = Text.Replace(txt, "Ó", "O") in Text.Contains(txtNorm, "COD")), 
                 hasHeader = List.Contains(headerFlags, true), 
                 promoted = if hasHeader then let headerIndex = List.PositionOf(headerFlags, true), skipped  = Table.Skip(tbl, headerIndex) in Table.PromoteHeaders(skipped, [PromoteAllScalars = true]) else tbl 
-            in promoted
+            in promoted,
+            
+        FnEncode = (t as nullable text) as nullable text => if t = null then null else Uri.EscapeDataString(t),
+
+        FnBuildColumnas = (n as number) as list => List.Transform({1..n}, each {"Columna " & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"})
     ]
 in
     Funciones
