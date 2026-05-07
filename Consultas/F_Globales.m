@@ -73,13 +73,13 @@ let
         FnCleanContratista = (t as nullable text) as nullable text =>
             if t = null then null
             else let
-                // Quitar acentos y símbolos base
+                // Limpieza de acentos basica
                 t1 = Funciones[FnRemoveAccentsSymbols](t),
-                // Arreglar el caracter de reemplazo Unicode (U+FFFD) que sale en SharePoint cuando falla la codificación de la Ñ
-                t2 = Text.Replace(t1, Character.FromNumber(65533), "Ñ"),
-                // Mayúsculas y sin espacios extra
+                // Reemplazo del caracter raro de codificacion (U+FFFD) por la letra N mayuscula (Ascii 78)
+                t2 = Text.Replace(t1, Character.FromNumber(65533), Character.FromNumber(78)),
+                // Texto en mayusculas sin espacios a los lados
                 t3 = Text.Trim(Text.Upper(t2)),
-                // Lista de sufijos legales a limpiar (ordenados de más largos a más cortos)
+                // Quitar sufijos legales (SAS, SA, LTDA, etc.)
                 suffixes = {" S.A.S.", " S.A.S", " SAS.", " SAS", " S.A.", " S.A", " SA.", " SA", " LTDA.", " LTDA", " S EN C", " S. EN C."},
                 t4 = List.Accumulate(suffixes, t3, (state, suffix) => 
                     if Text.EndsWith(state, suffix) then Text.Trim(Text.Range(state, 0, Text.Length(state) - Text.Length(suffix))) else state
