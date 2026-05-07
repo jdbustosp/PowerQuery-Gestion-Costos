@@ -45,8 +45,25 @@ let
         let key = [Centro de Costos] & "|" & [Codigo act] & "|" & [Ins]
         in try Record.Field(ClasificadorMap, key) otherwise null, type text),
 
+    // 🔥 UNIFICACIÓN DE CONTRATISTAS (Prioridad: COMPRAS y CONTRATOS)
+    // Extraemos los contratistas solo de las fuentes prioritarias
+    ContratistasPrioridad = Table.SelectRows(BaseClasificada, each ([Tipo] = "COMPRAS" or [Tipo] = "CONTRATOS") and [Nombre Contratista] <> null and Text.Trim([Nombre Contratista]) <> ""),
+    // Agrupamos por llave para tener 1 solo nombre maestro por insumo (se toma el primero que aparezca)
+    ContratistasMaestros = Table.Group(ContratistasPrioridad, {"Centro de Costos", "Codigo act", "Ins"}, {{"Nombre Maestro", each List.First([Nombre Contratista]), type text}}),
+    
+    // Cruzamos el maestro con toda la base
+    CruceContratistas = Table.NestedJoin(BaseClasificada, {"Centro de Costos", "Codigo act", "Ins"}, ContratistasMaestros, {"Centro de Costos", "Codigo act", "Ins"}, "Maestro", JoinKind.LeftOuter),
+    BaseExpandidaC = Table.ExpandTableColumn(CruceContratistas, "Maestro", {"Nombre Maestro"}),
+    
+    // Reemplazamos el nombre: Si hay maestro lo usamos, si no, dejamos el original
+    BaseConNombreUnificado = Table.AddColumn(BaseExpandidaC, "Nombre Contratista Final", each if [Nombre Maestro] <> null then [Nombre Maestro] else [Nombre Contratista], type text),
+    BaseClasificadaFinal = Table.RenameColumns(
+        Table.RemoveColumns(BaseConNombreUnificado, {"Nombre Contratista", "Nombre Maestro"}, MissingField.Ignore),
+        {{"Nombre Contratista Final", "Nombre Contratista"}}
+    ),
+
     NumCols = {"Cantidad Proyectado", "VT Proyectado", "Cantidad Consumido", "VT Consumido", "Cantidad Comprado", "V/U Comprado", "VT Comprado", "Cantidad Contratado", "V/U Contratado", "VT Contratado", "Cantidad Presupuesto", "V/U Presupuesto", "VT Presupuesto", "Cant. aprobacion", "V/U aprobacion", "VR total aprobacion", "Valor Total ppto (CC)", "Cantidad Cortes", "VT Cortes", "Valor descuento", "Cantidad_Calc", "V/U ppto (CC)", "Cantidad CC Cons", "V/U CC cons", "VT CC cons"},
-    NumerosSeguros = Table.TransformColumns(BaseClasificada, List.Transform(NumCols, each {_, (v) => let n = try Number.From(v) otherwise 0 in if n = null then 0 else n, type number}), null, MissingField.Ignore),
+    NumerosSeguros = Table.TransformColumns(BaseClasificadaFinal, List.Transform(NumCols, each {_, (v) => let n = try Number.From(v) otherwise 0 in if n = null then 0 else n, type number}), null, MissingField.Ignore),
 
     AddCantAseg = Table.AddColumn(NumerosSeguros, "Cantidad asegurada", each [Cantidad Contratado] + [Cantidad Comprado], type number),
     AddVTAseg = Table.AddColumn(AddCantAseg, "VT Asegurada", each [VT Contratado] + [VT Comprado], type number),
