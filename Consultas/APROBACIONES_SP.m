@@ -26,19 +26,17 @@ let
     // ============================================================
     // 1. Filtrar por el proyecto actual (ignorando lo que esté después del guion)
     FiltroProyecto = Table.SelectRows(Origen, each 
-        [Proyecto] <> null and 
-        Text.StartsWith(Text.Upper([Proyecto]), Text.Upper(ParamProyecto))
+        try [#"Proyecto:"] <> null and Text.StartsWith(Text.Upper([#"Proyecto:"]), Text.Upper(ParamProyecto)) otherwise false
     ),
 
-    // 2. Renombrar las columnas según tus instrucciones
-    // NOTA: Ajusta los nombres exactos si Excel los cargó ligeramente distintos
+    // 2. Renombrar las columnas exactas según la captura de error
     ColumnasRenombradas = Table.RenameColumns(FiltroProyecto, {
         {"Desc. - UM", "Ins"},
-        {"Nombre del proveedor", "Nombre Contratista"},
+        {"Nombre del proveedor: ", "Nombre Contratista"},
         {"# CC", "# CC - Comparativo"},
-        {"Cantidad", "Cantidad CC Cons"},
-        {"V/U", "V/U CC cons"},
-        {"Vr Total", "VT CC cons"}
+        {"Cant. Total", "Cantidad CC Cons"},
+        {"V/U TOTAL", "V/U CC cons"},
+        {"VR TOTAL", "VT CC cons"}
     }, MissingField.Ignore),
 
     // 3. Estandarización de tipos de datos
@@ -51,14 +49,16 @@ let
         {"VT CC cons", each FxToNumberFlex(_), type number}
     }, null, MissingField.Ignore),
 
-    // 4. Agregar la etiqueta Tipo
+    // 4. Agregar la etiqueta Tipo y Centro de Costos (vital para cruzar en BD)
     AgregadoTipo = Table.AddColumn(TextosLimpios, "Tipo", each "CC Consolidado", type text),
+    AgregadoCC = Table.AddColumn(AgregadoTipo, "Centro de Costos", each [#"Proyecto:"], type text),
 
     // ============================================================
     // EXTRACCIÓN DE COLUMNAS PARA BD
     // ============================================================
-    TablaFinal = Table.SelectColumns(AgregadoTipo, 
+    TablaFinal = Table.SelectColumns(AgregadoCC, 
         {
+            "Centro de Costos",
             "Tipo", 
             "Ins", 
             "Nombre Contratista", 
