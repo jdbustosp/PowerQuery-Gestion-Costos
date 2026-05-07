@@ -9,6 +9,31 @@ let
     ParamProyecto = Text.Trim(ProyectoActual),
 
     // ============================================================
+    // CARPETAS DE PROYECTO ACTUAL (Para Mapeo Exacto de CC)
+    // ============================================================
+    ListaCarpetas = try List.Distinct(SP_Archivos_Proyecto[Centro de Costos]) otherwise {},
+    FolderCount = List.Count(ListaCarpetas),
+    
+    // Función heurística para encontrar el nombre exacto de la carpeta
+    FnMatchFolder = (proyectoExcel as text) as text =>
+        if FolderCount = 0 then proyectoExcel
+        else if FolderCount = 1 then ListaCarpetas{0}
+        else 
+            let
+                proyUpper = Text.Upper(proyectoExcel),
+                // Buscar carpetas cuya última palabra (ej. "ET1", "INTERNO") coincida con el texto
+                Match = List.Select(ListaCarpetas, each 
+                    let 
+                        baseName = if Text.Contains(_, "-") then Text.Trim(Text.AfterDelimiter(_, "-")) else Text.Trim(_),
+                        lastWord = List.Last(Text.Split(baseName, " "))
+                    in 
+                        Text.Contains(proyUpper, lastWord)
+                ),
+                Result = if List.Count(Match) = 1 then Match{0} else proyectoExcel
+            in
+                Result,
+
+    // ============================================================
     // CONEXIÓN AL ARCHIVO EN SHAREPOINT
     // ============================================================
     SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
@@ -49,9 +74,9 @@ let
         {"VT CC cons", each FxToNumberFlex(_), type number}
     }, null, MissingField.Ignore),
 
-    // 4. Agregar la etiqueta Tipo y Centro de Costos (vital para cruzar en BD)
+    // 4. Agregar la etiqueta Tipo y Centro de Costos (usando mapeo heurístico)
     AgregadoTipo = Table.AddColumn(TextosLimpios, "Tipo", each "CC Consolidado", type text),
-    AgregadoCC = Table.AddColumn(AgregadoTipo, "Centro de Costos", each [#"Proyecto:"], type text),
+    AgregadoCC = Table.AddColumn(AgregadoTipo, "Centro de Costos", each FnMatchFolder([#"Proyecto:"]), type text),
 
     // ============================================================
     // EXTRACCIÓN DE COLUMNAS PARA BD
