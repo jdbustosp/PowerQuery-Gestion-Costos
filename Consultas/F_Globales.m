@@ -79,7 +79,9 @@ let
                 t3 = Text.Trim(Text.Upper(t2)),
                 // Limpieza de acentos basica manualmente para evitar referencia ciclica
                 replacements = {
-                    {"Á","A"},{"É","E"},{"Í","I"},{"Ó","O"},{"Ú","U"},{"Ä","A"},{"Ë","E"},{"Ï","I"},{"Ö","O"},{"Ü","U"}
+                    {Character.FromNumber(193),"A"},{Character.FromNumber(201),"E"},
+                    {Character.FromNumber(205),"I"},{Character.FromNumber(211),"O"},
+                    {Character.FromNumber(218),"U"},{Character.FromNumber(209),"N"}
                 },
                 t3_clean = List.Accumulate(replacements, t3, (state, current) => Text.Replace(state, current{0}, current{1})),
                 // Quitar sufijos legales (SAS, SA, LTDA, etc.)
