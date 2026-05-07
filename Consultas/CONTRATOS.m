@@ -5,8 +5,7 @@ let
     FnFormatCodigoAct = F_Globales[FnFormatCodigoAct],
     FxToNumberFlex = F_Globales[FxToNumberFlex],
     FnClaveLimpia = F_Globales[FnClaveLimpia],
-
-    Columnas_HTML = List.Transform({1..15}, each {"Columna" & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}),
+    Columnas_HTML = F_Globales[FnBuildColumnas](15),
 
     // ============================================================
     // 2. FUNCIÓN MÁGICA: PROCESAR CORTES

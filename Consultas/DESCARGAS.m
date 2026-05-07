@@ -59,6 +59,8 @@ let
     TablaFinal = Table.SelectColumns(TiposFinales, 
         {"Proyecto", "Centro de Costos", "Subcapitulo", "Capitulo", "Actividad", "Codigo ins", "Ins", 
          "Cantidad", "V/U ppto (CC)", "Valor Total ppto (CC)", 
-         "# CC - Comparativo", "# CC", "Comparativo"}, MissingField.Ignore)
+         "# CC - Comparativo", "# CC", "Comparativo"}, MissingField.Ignore),
+
+    Resultado = Table.Buffer(TablaFinal)
 in
-    TablaFinal
+    Resultado

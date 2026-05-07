@@ -7,13 +7,12 @@ let
     BasePath = "/sites/MiGerenciaViv/Departamento Tecnico/COORDINACION DE PRESUPUESTOS/0. Reportes EDT - Control costos interno/" & ParamProyecto,
     Headers = [Accept="application/json;odata=nometadata"],
 
-    // Codificar ruta para URL (solo espacios, que es lo más común)
-    FnEncode = (path as text) as text => 
-        Text.Combine(List.Transform(Text.Split(path, "/"), each Uri.EscapeDataString(_)), "/"),
+    FnEncode = F_Globales[FnEncode],
 
     // PASO 1: Listar carpetas del proyecto (Centro de Costos)
     FoldersUrl = SiteUrl & "/_api/web/GetFolderByServerRelativeUrl('" & FnEncode(BasePath) & "')/Folders?$select=Name",
-    CCFolders = Table.FromRecords(Json.Document(Web.Contents(FoldersUrl, [Headers=Headers]))[value]),
+    CCFolders = let r = try Json.Document(Web.Contents(FoldersUrl, [Headers=Headers])) otherwise null
+                in if r = null then #table({"Name"},{}) else Table.FromRecords(r[value]),
 
     // PASO 2: Para cada CC, listar archivos en /Actual/
     WithFiles = Table.AddColumn(CCFolders, "Archivos", each

@@ -4,13 +4,13 @@ let
     // ============================================================
     FnFormatCodigoAct = F_Globales[FnFormatCodigoAct],
     FxToNumberFlex = F_Globales[FxToNumberFlex],
+    Columnas_HTML = F_Globales[FnBuildColumnas](15),
 
     // ============================================================
     // FUNCIÓN MÁGICA: PROCESAR DESCUENTOS
     // ============================================================
     FxProcesarDescuentos = (Binario as binary) =>
         let
-            Columnas_HTML = List.Transform({1..15}, each {"Columna" & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}),
             RawTable_0 = try Excel.Workbook(Binario, null, true){0}[Data]
                        otherwise Html.Table(Text.FromBinary(Binario, 1252), Columnas_HTML, [RowSelector="tr"]),
             // Estandarizar nombres de columnas

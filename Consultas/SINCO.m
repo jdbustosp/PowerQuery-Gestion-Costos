@@ -26,6 +26,6 @@ let
          "# OC / Contrato", "Nombre Contratista", "Cantidad asegurada", "V/U asegurada", 
          "VT Asegurada", "Descripcion contrato", "Tipo"}, MissingField.Ignore),
 
-    ResultadoFinal = ColumnasFinales
+    ResultadoFinal = Table.Buffer(ColumnasFinales)
 in
     ResultadoFinal

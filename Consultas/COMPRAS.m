@@ -5,11 +5,9 @@ let
     FnFormatCodigoAct = F_Globales[FnFormatCodigoAct],
     FnPrepareTableWithHeader = F_Globales[FnPrepareTableWithHeader],
     FxToNumberFlex = F_Globales[FxToNumberFlex],
-    replacements = {{"á","a"},{"Á","A"},{"é","e"},{"É","E"},{"í","i"},{"Í","I"},{"ó","o"},{"Ó","O"},{"ú","u"},{"Ú","U"},{"º",""},{"°",""},{"¨",""}},
-    Normalize = (t as nullable text) => let txt = if t=null then "" else Text.From(t), result = List.Accumulate(replacements, txt, (state,current)=> Text.Replace(state, current{0}, current{1})) in Text.Trim(result),
-    FxClaveTexto = (t as nullable text) => let clean = Normalize(t), sinPar = if Text.Contains(clean,"(") then Text.BeforeDelimiter(clean,"(") else clean, palabras = List.Select(Text.Split(sinPar," "), each _<> ""), base = if List.Count(palabras)=0 then null else Text.Lower(Text.Combine(palabras," ")) in base,
+    FnClaveLimpia = F_Globales[FnClaveLimpia],
     FnMapColumn = (rec as record, cols as list, keywords as list) => let match = List.First(List.Select(cols, (c) => List.AnyTrue(List.Transform(keywords, (k) => Text.Contains(Text.Upper(c), k))))) in if match = null then null else Record.Field(rec, match),
-    Columnas_OC = List.Transform({1..10}, each {"Columna" & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}),
+    Columnas_OC = F_Globales[FnBuildColumnas](10),
 
     // ============================================================
     // FUNCIÓN MÁGICA: PROCESAR COMPRAS
@@ -32,7 +30,7 @@ let
         DetallesStd = Table.ExpandRecordColumn(MapStd, "Std", {"Codigo_ins", "Ins", "Act", "Cant", "VT", "VU_Crudo", "IVA_Crudo", "OC"}, {"Codigo ins", "Ins", "Actividad", "Cantidad Comprado", "VT Comprado", "VU_Crudo", "IVA_Crudo", "# OC / Contrato"}),
         DetConKeyOC = Table.AddColumn(DetallesStd, "OC_Key", each Text.Trim(Text.From(if [#"# OC / Contrato"] = null then "" else [#"# OC / Contrato"])), type text),
         DetConCodAct = Table.AddColumn(DetConKeyOC, "Codigo act", each let c = Text.Trim(Text.BeforeDelimiter(Text.Trim(Text.From(if [Actividad] = null then "" else [Actividad])), "-", 0)) in if c = "" then null else c, type text),
-        DetConClave = Table.AddColumn(DetConCodAct, "InsClave", each FxClaveTexto([Ins]), type text),
+        DetConClave = Table.AddColumn(DetConCodAct, "InsClave", each FnClaveLimpia([Ins]), type text),
         MergedOC = Table.NestedJoin(DetConClave, {"OC_Key"}, Ordenes_Agrupadas, {"OC_Key"}, "ORD", JoinKind.LeftOuter),
         ExpandedOC = Table.ExpandTableColumn(MergedOC, "ORD", {"Proveedor_Raw"}, {"Proveedor_Raw"}),
         AddedNombreContratista = Table.AddColumn(ExpandedOC, "Nombre Contratista", each let p = try Text.From([Proveedor_Raw]) otherwise null, t = if p = null then null else let pos = Text.PositionOf(p, "-") in if pos < 0 then Text.Trim(p) else Text.Trim(Text.Range(p, pos + 1)) in t, type text)
@@ -69,7 +67,7 @@ let
     }, null, MissingField.Ignore),
     ITEMS_Base = Table.SelectColumns(ITEMS_Clean, {"Centro de Costos", "Codigo ins", "Ins", "Codigo act", "Actividad", "Capitulo", "Subcapitulo"}),
 
-    ITEMS_Insumos_Dist = Table.Buffer(Table.Distinct(Table.AddColumn(ITEMS_Base, "InsClave", each FxClaveTexto([Ins]), type text), {"Centro de Costos", "Codigo act", "InsClave"})),
+    ITEMS_Insumos_Dist = Table.Buffer(Table.Distinct(Table.AddColumn(ITEMS_Base, "InsClave", each FnClaveLimpia([Ins]), type text), {"Centro de Costos", "Codigo act", "InsClave"})),
     ITEMS_Respaldo = Table.Buffer(Table.Distinct(ITEMS_Insumos_Dist, {"Centro de Costos", "InsClave"})),
 
     ItemsPorCodigo_Estricto = Table.Buffer(Table.Group(ITEMS_Base, {"Centro de Costos", "Codigo act"}, {
