@@ -6,7 +6,9 @@ let
     FnParseNumber = F_Globales[FxToNumberFlex],
     FnRemoveAccentsSymbols = F_Globales[FnRemoveAccentsSymbols],
     FnPrepareTableWithHeader = F_Globales[FnPrepareTableWithHeader],
-    Columnas_HTML = List.Transform({1..25}, each {"Columna " & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}),
+    FnEncode = F_Globales[FnEncode],
+    Columnas_HTML = F_Globales[FnBuildColumnas](25),
+    Columnas_APU = F_Globales[FnBuildColumnas](3),
 
     // =========================================================
     // API REST DE SHAREPOINT (TODOS LOS PROYECTOS)
@@ -14,9 +16,6 @@ let
     SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
     BasePath = "/sites/MiGerenciaViv/Departamento Tecnico/COORDINACION DE PRESUPUESTOS/0. Reportes EDT - Control costos interno",
     Headers = [Accept="application/json;odata=nometadata"],
-
-    FnEncode = (path as text) as text => 
-        Text.Combine(List.Transform(Text.Split(path, "/"), each Uri.EscapeDataString(_)), "/"),
 
     // =========================================================
     // FUNCIÓN: PROCESAR CENTRO DE COSTO
@@ -66,8 +65,7 @@ let
 
             // 🚀 PARSEO APU - Excel.Workbook (más rápido)
             OrigenAPU_Raw = try Excel.Workbook(BinarioPresupuesto, null, true){0}[Data]
-                            otherwise Html.Table(Text.FromBinary(BinarioPresupuesto, 65001), 
-                                List.Transform({1..3}, each {"Columna " & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}), [RowSelector="tr"]),
+                            otherwise Html.Table(Text.FromBinary(BinarioPresupuesto, 65001), Columnas_APU, [RowSelector="tr"]),
             OrigenAPU_Cols = Table.SelectColumns(OrigenAPU_Raw, List.FirstN(Table.ColumnNames(OrigenAPU_Raw), 3)),
             OrigenAPU = Table.RenameColumns(OrigenAPU_Cols, List.Zip({Table.ColumnNames(OrigenAPU_Cols), {"Columna 1", "Columna 2", "Columna 3"}})),
             

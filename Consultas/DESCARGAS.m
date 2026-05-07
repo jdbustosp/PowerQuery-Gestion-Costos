@@ -4,6 +4,7 @@ let
     // ============================================================
     FxToNumberFlex = F_Globales[FxToNumberFlex],
     FnCleanText = F_Globales[FnCleanText],
+    FnEncode = F_Globales[FnEncode],
 
     // ============================================================
     // CONEXIÓN A SHAREPOINT: Archivo "Descarga ppto"
@@ -11,9 +12,6 @@ let
     // ============================================================
     SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
     FilePath = "/sites/MiGerenciaViv/Departamento Tecnico/COORDINACION DE PRESUPUESTOS/0. Descargas pptos - Control costos interno/Descarga ppto.xlsx",
-    
-    FnEncode = (path as text) as text => 
-        Text.Combine(List.Transform(Text.Split(path, "/"), each Uri.EscapeDataString(_)), "/"),
 
     // Descargar el archivo Excel desde SharePoint
     BinarioArchivo = Binary.Buffer(

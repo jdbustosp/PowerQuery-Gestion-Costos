@@ -44,7 +44,7 @@ let
     Libro = try Excel.Workbook(Binary.Buffer(Binario), null, true) otherwise null,
     
     // Si falla la lectura, devolvemos tabla vacía, si no, tomamos la primera hoja
-    Origen = if Libro = null then #table({"Proyecto"}, {}) else Table.PromoteHeaders(Libro{0}[Data], [PromoteAllScalars=true]),
+    Origen = if Libro = null then #table({"Proyecto:"}, {}) else Table.PromoteHeaders(Libro{0}[Data], [PromoteAllScalars=true]),
 
     // ============================================================
     // FILTRO Y MAPEO

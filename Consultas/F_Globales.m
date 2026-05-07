@@ -66,9 +66,11 @@ let
                 promoted = if hasHeader then let headerIndex = List.PositionOf(headerFlags, true), skipped  = Table.Skip(tbl, headerIndex) in Table.PromoteHeaders(skipped, [PromoteAllScalars = true]) else tbl 
             in promoted,
             
-        FnEncode = (t as nullable text) as nullable text => if t = null then null else Uri.EscapeDataString(t),
+        FnEncode = (path as nullable text) as nullable text =>
+            if path = null then null
+            else Text.Combine(List.Transform(Text.Split(path, "/"), each Uri.EscapeDataString(_)), "/"),
 
-        FnBuildColumnas = (n as number) as list => List.Transform({1..n}, each {"Columna " & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")}),
+        FnBuildColumnas = (n as number) as list => List.Transform({1..n}, each {"Columna " & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}),
 
         FnCleanContratista = (t as nullable text) as nullable text =>
             if t = null then null
