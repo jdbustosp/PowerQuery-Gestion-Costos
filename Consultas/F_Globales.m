@@ -73,15 +73,18 @@ let
         FnCleanContratista = (t as nullable text) as nullable text =>
             if t = null then null
             else let
-                // Limpieza de acentos basica
-                t1 = Funciones[FnRemoveAccentsSymbols](t),
                 // Reemplazo del caracter raro de codificacion (U+FFFD) por la letra N mayuscula (Ascii 78)
-                t2 = Text.Replace(t1, Character.FromNumber(65533), Character.FromNumber(78)),
+                t2 = Text.Replace(t, Character.FromNumber(65533), Character.FromNumber(78)),
                 // Texto en mayusculas sin espacios a los lados
                 t3 = Text.Trim(Text.Upper(t2)),
+                // Limpieza de acentos basica manualmente para evitar referencia ciclica
+                replacements = {
+                    {"Á","A"},{"É","E"},{"Í","I"},{"Ó","O"},{"Ú","U"},{"Ä","A"},{"Ë","E"},{"Ï","I"},{"Ö","O"},{"Ü","U"}
+                },
+                t3_clean = List.Accumulate(replacements, t3, (state, current) => Text.Replace(state, current{0}, current{1})),
                 // Quitar sufijos legales (SAS, SA, LTDA, etc.)
                 suffixes = {" S.A.S.", " S.A.S", " SAS.", " SAS", " S.A.", " S.A", " SA.", " SA", " LTDA.", " LTDA", " S EN C", " S. EN C."},
-                t4 = List.Accumulate(suffixes, t3, (state, suffix) => 
+                t4 = List.Accumulate(suffixes, t3_clean, (state, suffix) => 
                     if Text.EndsWith(state, suffix) then Text.Trim(Text.Range(state, 0, Text.Length(state) - Text.Length(suffix))) else state
                 )
             in
