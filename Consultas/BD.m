@@ -1,6 +1,7 @@
 let
     Tol = 0.01,
     FnRemoveAccentsSymbols = F_Globales[FnRemoveAccentsSymbols],
+    FnCleanContratista = F_Globales[FnCleanContratista],
 
     // 🔥 MODO CASCADA: Conexión directa a las consultas en memoria.
     T_Items_Raw = ITEMSINSUMOS,
@@ -25,7 +26,7 @@ let
         {"Ins", each if _ = null then "" else Text.Upper(Text.Trim(Text.From(_))), type text},
         {"Tipo", each if _ = null then "" else Text.Upper(Text.Trim(Text.From(_))), type text},
         {"# OC / Contrato", each if _ = null then null else Text.Trim(Text.From(_)), type text},
-        {"Nombre Contratista", each FnRemoveAccentsSymbols(if _ = null then null else Text.Trim(Text.From(_))), type text},
+        {"Nombre Contratista", each FnCleanContratista(_), type text},
         {"Descripcion contrato", each FnRemoveAccentsSymbols(if _ = null then null else Text.Trim(Text.From(_))), type text}
     }, null, MissingField.Ignore),
 
