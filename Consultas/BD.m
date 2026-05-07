@@ -10,10 +10,11 @@ let
     T_Contratos = CONTRATOS,
     T_Ppto = PPTO_BD,
     T_Comp = COMPARATIVOS,
+    T_Aprob = try APROBACIONES_SP otherwise #table({"Tipo"}, {}),
     T_Desc = DESCUENTOS,
     T_Disp = DISPONIBLE,
 
-    Origen = Table.Combine({T_Items, T_Compras, T_Contratos, T_Ppto, T_Comp, T_Desc, T_Disp}),
+    Origen = Table.Combine({T_Items, T_Compras, T_Contratos, T_Ppto, T_Comp, T_Aprob, T_Desc, T_Disp}),
 
     ColumnasReordenadas = Table.SelectColumns(Origen, 
         {"Centro de Costos", "Codigo act", "Codigo ins", "Ins", "Actividad", "Capitulo", "Subcapitulo", "Tipo", "# OC / Contrato", "Nombre Contratista", "Descripcion contrato", "# CC - Comparativo", "Clasificador", "Cantidad Proyectado", "VT Proyectado", "Cantidad Consumido", "VT Consumido", "Cantidad Comprado", "V/U Comprado", "VT Comprado", "Cantidad Contratado", "V/U Contratado", "VT Contratado", "Cantidad Presupuesto", "V/U Presupuesto", "VT Presupuesto", "Cant. aprobacion", "V/U aprobacion", "VR total aprobacion", "Valor Total ppto (CC)", "Cantidad Cortes", "VT Cortes", "Valor descuento", "Cantidad_Calc", "V/U ppto (CC)"}, MissingField.Ignore),
