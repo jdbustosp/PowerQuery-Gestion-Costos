@@ -75,8 +75,8 @@ let
             else let
                 // Quitar acentos y símbolos base
                 t1 = Funciones[FnRemoveAccentsSymbols](t),
-                // Arreglar el caracter de reemplazo Unicode que sale en SharePoint cuando falla la codificación de la Ñ
-                t2 = Text.Replace(t1, "", "Ñ"),
+                // Arreglar el caracter de reemplazo Unicode (U+FFFD) que sale en SharePoint cuando falla la codificación de la Ñ
+                t2 = Text.Replace(t1, Character.FromNumber(65533), "Ñ"),
                 // Mayúsculas y sin espacios extra
                 t3 = Text.Trim(Text.Upper(t2)),
                 // Lista de sufijos legales a limpiar (ordenados de más largos a más cortos)
