@@ -6,7 +6,7 @@ let
     FxToNumberFlex = F_Globales[FxToNumberFlex],
     FnFormatCodigoAct = F_Globales[FnFormatCodigoAct],
     
-    ParamProyecto = Text.Trim(Proyectoactual),
+    ParamProyecto = Text.Trim(ProyectoActual),
 
     // ============================================================
     // CONEXIÓN AL ARCHIVO EN SHAREPOINT
@@ -35,34 +35,37 @@ let
     ColumnasRenombradas = Table.RenameColumns(FiltroProyecto, {
         {"Desc. - UM", "Ins"},
         {"Nombre del proveedor", "Nombre Contratista"},
-        {"# CC", "# CC - Comparativo"}
+        {"# CC", "# CC - Comparativo"},
+        {"Cantidad", "Cantidad CC Cons"},
+        {"V/U", "V/U CC cons"},
+        {"Vr Total", "VT CC cons"}
     }, MissingField.Ignore),
 
     // 3. Estandarización de tipos de datos
     TextosLimpios = Table.TransformColumns(ColumnasRenombradas, {
         {"Ins", each if _ = null then null else Text.Trim(Text.From(_)), type text},
         {"Nombre Contratista", each if _ = null then null else Text.Trim(Text.From(_)), type text},
-        {"# CC - Comparativo", each if _ = null then null else Text.Trim(Text.From(_)), type text}
-        // Agrega aquí "CC" o "Actividad" si es necesario mapearlos para BD
+        {"# CC - Comparativo", each if _ = null then null else Text.Trim(Text.From(_)), type text},
+        {"Cantidad CC Cons", each FxToNumberFlex(_), type number},
+        {"V/U CC cons", each FxToNumberFlex(_), type number},
+        {"VT CC cons", each FxToNumberFlex(_), type number}
     }, null, MissingField.Ignore),
 
     // 4. Agregar la etiqueta Tipo
-    AgregadoTipo = Table.AddColumn(TextosLimpios, "Tipo", each "CC", type text),
+    AgregadoTipo = Table.AddColumn(TextosLimpios, "Tipo", each "CC Consolidado", type text),
 
     // ============================================================
     // EXTRACCIÓN DE COLUMNAS PARA BD
     // ============================================================
-    // IMPORTANTE: Modifica los nombres "Cant. aprobacion" y "VR total aprobacion" 
-    // según cómo se llamen exactamente en las columnas azules de tu Excel.
     TablaFinal = Table.SelectColumns(AgregadoTipo, 
         {
             "Tipo", 
             "Ins", 
             "Nombre Contratista", 
-            "# CC - Comparativo"
-            // "CC",                    // Descomentar si esta columna va a "Centro de Costos"
-            // "Cant. aprobacion",      // <-- REEMPLAZAR por el nombre real de cantidad
-            // "VR total aprobacion"    // <-- REEMPLAZAR por el nombre real de valor
+            "# CC - Comparativo",
+            "Cantidad CC Cons",
+            "V/U CC cons",
+            "VT CC cons"
         }, 
         MissingField.Ignore
     )
