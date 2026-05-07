@@ -11,8 +11,9 @@ let
 
     // PASO 1: Listar carpetas del proyecto (Centro de Costos)
     FoldersUrl = SiteUrl & "/_api/web/GetFolderByServerRelativeUrl('" & FnEncode(BasePath) & "')/Folders?$select=Name",
-    CCFolders = let r = try Json.Document(Web.Contents(FoldersUrl, [Headers=Headers])) otherwise null
-                in if r = null then #table({"Name"},{}) else Table.FromRecords(r[value]),
+    // Quitamos el 'try' para que si falla (por permisos o firewall), Power BI te muestre el error real
+    CCFolders = let r = Json.Document(Web.Contents(FoldersUrl, [Headers=Headers]))
+                in Table.FromRecords(r[value]),
 
     // PASO 2: Para cada CC, listar archivos en /Actual/
     WithFiles = Table.AddColumn(CCFolders, "Archivos", each
