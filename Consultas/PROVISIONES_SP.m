@@ -53,7 +53,7 @@ let
     // ============================================================
     // FILTRO Y MAPEO
     // ============================================================
-    // 1. Filtrar por el proyecto actual
+    // 1. Filtrar por el proyecto actual y por Tipo = DIRECTOS
     FiltroProyecto = Table.SelectRows(Origen, each 
         try [PROYECTO] <> null and (
             Text.StartsWith(Text.Upper([PROYECTO]), Text.Upper(ParamProyecto)) or
@@ -61,8 +61,12 @@ let
         ) otherwise false
     ),
 
+    FiltroDirectos = Table.SelectRows(FiltroProyecto, each 
+        try [Tipo] <> null and Text.Upper(Text.Trim([Tipo])) = "DIRECTOS" otherwise false
+    ),
+
     // 2. Renombrar columnas clave hacia BD.m
-    ColumnasRenombradas = Table.RenameColumns(FiltroProyecto, {
+    ColumnasRenombradas = Table.RenameColumns(FiltroDirectos, {
         {"Nombre_prov", "Nombre Contratista"},
         {"No_Orden_contrato", "# OC / Contrato"}
     }, MissingField.Ignore),
@@ -76,7 +80,8 @@ let
     }, null, MissingField.Ignore),
 
     // 4. Agregar la etiqueta Tipo y Centro de Costos
-    AgregadoTipo = Table.AddColumn(TextosLimpios, "Tipo", each "PROVISIONES", type text),
+    SinTipoOriginal = Table.RemoveColumns(TextosLimpios, {"Tipo"}, MissingField.Ignore),
+    AgregadoTipo = Table.AddColumn(SinTipoOriginal, "Tipo", each "PROVISIONES", type text),
     AgregadoCC = Table.AddColumn(AgregadoTipo, "Centro de Costos", each 
         if Text.StartsWith(Text.Upper(ParamProyecto), "PAMPLONA 1") and [#"# OC / Contrato"] <> null then
             let
