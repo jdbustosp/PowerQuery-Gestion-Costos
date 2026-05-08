@@ -12,13 +12,14 @@ let
     T_Ppto = PPTO_BD,
     T_Comp = COMPARATIVOS,
     T_Aprob = try APROBACIONES_SP otherwise #table({"Tipo"}, {}),
+    T_Prov = try PROVISIONES_SP otherwise #table({"Tipo"}, {}),
     T_Desc = DESCUENTOS,
     T_Disp = DISPONIBLE,
 
-    Origen = Table.Combine({T_Items, T_Compras, T_Contratos, T_Ppto, T_Comp, T_Aprob, T_Desc, T_Disp}),
+    Origen = Table.Combine({T_Items, T_Compras, T_Contratos, T_Ppto, T_Comp, T_Aprob, T_Prov, T_Desc, T_Disp}),
 
     ColumnasReordenadas = Table.SelectColumns(Origen, 
-        {"Centro de Costos", "Codigo act", "Codigo ins", "Ins", "Actividad", "Capitulo", "Subcapitulo", "Tipo", "# OC / Contrato", "Nombre Contratista", "Descripcion contrato", "# CC - Comparativo", "Clasificador", "Cantidad Proyectado", "VT Proyectado", "Cantidad Consumido", "VT Consumido", "Cantidad Comprado", "V/U Comprado", "VT Comprado", "Cantidad Contratado", "V/U Contratado", "VT Contratado", "Cantidad Presupuesto", "V/U Presupuesto", "VT Presupuesto", "Cant. aprobacion", "V/U aprobacion", "VR total aprobacion", "Valor Total ppto (CC)", "Cantidad Cortes", "VT Cortes", "Valor descuento", "Cantidad_Calc", "V/U ppto (CC)", "Cantidad CC Cons", "V/U CC cons", "VT CC cons"}, MissingField.Ignore),
+        {"Centro de Costos", "Codigo act", "Codigo ins", "Ins", "Actividad", "Capitulo", "Subcapitulo", "Tipo", "# OC / Contrato", "Nombre Contratista", "Descripcion contrato", "# CC - Comparativo", "Clasificador", "Cantidad Proyectado", "VT Proyectado", "Cantidad Consumido", "VT Consumido", "Cantidad Comprado", "V/U Comprado", "VT Comprado", "Cantidad Contratado", "V/U Contratado", "VT Contratado", "Cantidad Presupuesto", "V/U Presupuesto", "VT Presupuesto", "Cant. aprobacion", "V/U aprobacion", "VR total aprobacion", "Valor Total ppto (CC)", "Cantidad Cortes", "VT Cortes", "Valor descuento", "Cantidad_Calc", "V/U ppto (CC)", "Cantidad CC Cons", "V/U CC cons", "VT CC cons", "VR_Bruto_con_desc", "Estado", "Fecha_de_pago", "# Prov._(descue", "No_Prov", "Centros_de_costos", "Clasificador_Actividad", "Capitulo_Costo directo", "Capitulo_Centro_Costos", "NIT", "No_Factura", "Fecha_Factura"}, MissingField.Ignore),
 
     LlavesLimpias = Table.TransformColumns(ColumnasReordenadas, {
         {"Centro de Costos", each if _ = null then "" else Text.Upper(Text.Trim(Text.From(_))), type text},
@@ -63,7 +64,7 @@ let
         {{"Nombre Contratista Final", "Nombre Contratista"}}
     ),
 
-    NumCols = {"Cantidad Proyectado", "VT Proyectado", "Cantidad Consumido", "VT Consumido", "Cantidad Comprado", "V/U Comprado", "VT Comprado", "Cantidad Contratado", "V/U Contratado", "VT Contratado", "Cantidad Presupuesto", "V/U Presupuesto", "VT Presupuesto", "Cant. aprobacion", "V/U aprobacion", "VR total aprobacion", "Valor Total ppto (CC)", "Cantidad Cortes", "VT Cortes", "Valor descuento", "Cantidad_Calc", "V/U ppto (CC)", "Cantidad CC Cons", "V/U CC cons", "VT CC cons"},
+    NumCols = {"Cantidad Proyectado", "VT Proyectado", "Cantidad Consumido", "VT Consumido", "Cantidad Comprado", "V/U Comprado", "VT Comprado", "Cantidad Contratado", "V/U Contratado", "VT Contratado", "Cantidad Presupuesto", "V/U Presupuesto", "VT Presupuesto", "Cant. aprobacion", "V/U aprobacion", "VR total aprobacion", "Valor Total ppto (CC)", "Cantidad Cortes", "VT Cortes", "Valor descuento", "Cantidad_Calc", "V/U ppto (CC)", "Cantidad CC Cons", "V/U CC cons", "VT CC cons", "VR_Bruto_con_desc"},
     NumerosSeguros = Table.TransformColumns(BaseClasificadaFinal, List.Transform(NumCols, each {_, (v) => let n = try Number.From(v) otherwise 0 in if n = null then 0 else n, type number}), null, MissingField.Ignore),
 
     AddCantAseg = Table.AddColumn(NumerosSeguros, "Cantidad asegurada", each [Cantidad Contratado] + [Cantidad Comprado], type number),
