@@ -76,7 +76,16 @@ let
 
     // 4. Agregar la etiqueta Tipo y Centro de Costos (usando mapeo heurístico)
     AgregadoTipo = Table.AddColumn(TextosLimpios, "Tipo", each "CC Consolidado", type text),
-    AgregadoCC = Table.AddColumn(AgregadoTipo, "Centro de Costos", each FnMatchFolder([#"Proyecto:"]), type text),
+    AgregadoCC = Table.AddColumn(AgregadoTipo, "Centro de Costos", each 
+        if Text.StartsWith(Text.Upper(ParamProyecto), "PAMPLONA 1") and [#"# CC - Comparativo"] <> null then
+            let
+                ccPrefix = Text.Trim(Text.BeforeDelimiter([#"# CC - Comparativo"], "-")),
+                matchFolder = List.Select(ListaCarpetas, (x) => Text.StartsWith(x, ccPrefix & "-")),
+                result = if List.Count(matchFolder) > 0 then matchFolder{0} else FnMatchFolder([#"Proyecto:"])
+            in result
+        else 
+            FnMatchFolder([#"Proyecto:"])
+    , type text),
 
     // ============================================================
     // EXTRACCIÓN DE COLUMNAS PARA BD
