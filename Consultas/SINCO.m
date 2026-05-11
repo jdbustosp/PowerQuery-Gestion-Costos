@@ -13,8 +13,9 @@ let
         (let ocText = if [#"# OC / Contrato"] = null then "" else Text.Trim(Text.From([#"# OC / Contrato"])) in ocText = "" or not Record.HasFields(SetOC, {ocText}))
     ),
 
-    // Filtro de ceros: solo VT Asegurada (ya no hay columnas PPTO)
-    FiltroCeros = Table.SelectRows(FiltroExclusion, each [VT Asegurada] <> 0 and [VT Asegurada] <> null),
+    // try/otherwise false: si alguna fila de BD trajo un Error en VT Asegurada (en vez de null o 0)
+    // el filtro sin proteccion falla silenciosamente y devuelve 0 filas
+    FiltroCeros = Table.SelectRows(FiltroExclusion, each try ([VT Asegurada] <> 0 and [VT Asegurada] <> null) otherwise false),
 
     // 🚀 Limpiar acentos en Nombre Contratista y Descripcion contrato
     LimpiezaTextos = Table.TransformColumns(FiltroCeros, {
