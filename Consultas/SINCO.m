@@ -13,6 +13,10 @@ let
         let n = try Number.From(v) otherwise null
         in if n = null then 0 else n,
 
+    GetField = (r as record, fieldName as text, defaultValue as any) as any =>
+        let value = try Record.Field(r, fieldName) otherwise defaultValue
+        in if value = null then defaultValue else value,
+
     ListaOC_Excluir = List.Distinct(
         List.RemoveNulls(
             List.Transform(
@@ -28,12 +32,12 @@ let
         else Record.FromList(List.Repeat({true}, List.Count(ListaOC_Excluir)), ListaOC_Excluir),
 
     BaseConValor = Table.SelectRows(Source, each
-        Text.Upper(ToTextClean(Record.FieldOrDefault(_, "Tipo", ""))) <> "PPTO" and
-        ToNumber0(Record.FieldOrDefault(_, "VT Asegurada", 0)) <> 0
+        Text.Upper(ToTextClean(GetField(_, "Tipo", ""))) <> "PPTO" and
+        ToNumber0(GetField(_, "VT Asegurada", 0)) <> 0
     ),
 
     FiltradoPorOC = Table.SelectRows(BaseConValor, each
-        let ocText = ToTextClean(Record.FieldOrDefault(_, "# OC / Contrato", ""))
+        let ocText = ToTextClean(GetField(_, "# OC / Contrato", ""))
         in ocText = "" or not Record.HasFields(SetOC, {ocText})
     ),
 
