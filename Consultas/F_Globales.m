@@ -35,9 +35,8 @@ let
         // Incluye Ñ/ñ y mantiene las mojibakes UTF-8 mal interpretadas
         // El try inicial protege contra entradas Error/Record/List que romperian Text.From
         FnRemoveAccentsSymbols = (t as any) as nullable text =>
-            let initial = try (if t = null then null else Text.From(t)) otherwise null in
-            if initial = null then null
-            else let
+            let
+                initial = try (if t = null then null else Text.From(t)) otherwise null,
                 replacements = {
                     {“á”,”a”},{“Á”,”A”},{“é”,”e”},{“É”,”E”},{“í”,”i”},{“Í”,”I”},{“ó”,”o”},{“Ó”,”O”},{“ú”,”u”},{“Ú”,”U”},
                     {“ñ”,”n”},{“Ñ”,”N”},
@@ -45,7 +44,7 @@ let
                     {“Ã””,”O”}, {“Ã’”,”N”}, {“Ã¡”,”A”}, {“Ã©”,”E”}, {“Ã³”,”O”}, {“Ãº”,”U”}, {“Ã”,”A”},
                     {“#(lf)”, “ “}, {“#(cr)”, “ “}
                 },
-                result = List.Accumulate(replacements, initial, (state, current) => Text.Replace(state, current{0}, current{1}))
+                result = if initial = null then null else List.Accumulate(replacements, initial, (state, current) => Text.Replace(state, current{0}, current{1}))
             in result,
 
         FnClaveLimpia = (t as nullable text) as nullable text =>
@@ -80,27 +79,22 @@ let
         FnBuildColumnas = (n as number) as list => List.Transform({1..n}, each {"Columna " & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}),
 
         FnCleanContratista = (t as any) as nullable text =>
-            let safe = try (if t = null then null else Text.From(t)) otherwise null in
-            if safe = null then null
-            else let
-                // Reemplazo del caracter raro de codificacion (U+FFFD) por la letra N mayuscula (Ascii 78)
-                t2 = Text.Replace(safe, Character.FromNumber(65533), Character.FromNumber(78)),
-                // Texto en mayusculas sin espacios a los lados
-                t3 = Text.Trim(Text.Upper(t2)),
-                // Limpieza de acentos basica manualmente para evitar referencia ciclica
+            let
+                safe = try (if t = null then null else Text.From(t)) otherwise null,
+                t2 = if safe = null then null else Text.Replace(safe, Character.FromNumber(65533), Character.FromNumber(78)),
+                t3 = if t2 = null then null else Text.Trim(Text.Upper(t2)),
                 replacements = {
                     {Character.FromNumber(193),"A"},{Character.FromNumber(201),"E"},
                     {Character.FromNumber(205),"I"},{Character.FromNumber(211),"O"},
                     {Character.FromNumber(218),"U"},{Character.FromNumber(209),"N"}
                 },
-                t3_clean = List.Accumulate(replacements, t3, (state, current) => Text.Replace(state, current{0}, current{1})),
-                // Quitar sufijos legales (SAS, SA, LTDA, etc.)
+                t3_clean = if t3 = null then null else List.Accumulate(replacements, t3, (state, current) => Text.Replace(state, current{0}, current{1})),
                 suffixes = {" S.A.S.", " S.A.S", " SAS.", " SAS", " S.A.", " S.A", " SA.", " SA", " LTDA.", " LTDA", " S EN C", " S. EN C."},
-                t4 = List.Accumulate(suffixes, t3_clean, (state, suffix) =>
+                t4 = if t3_clean = null then null else List.Accumulate(suffixes, t3_clean, (state, suffix) =>
                     if Text.EndsWith(state, suffix) then Text.Trim(Text.Range(state, 0, Text.Length(state) - Text.Length(suffix))) else state
-                )
-            in
-                if t4 = "" then null else t4,
+                ),
+                result = if t4 = null or t4 = "" then null else t4
+            in result,
 
         // Mapea una columna por palabras clave dentro de una lista de nombres de columna (movido desde COMPRAS.m)
         FnMapColumn = (rec as record, cols as list, keywords as list) =>
