@@ -5,27 +5,35 @@ let
     Headers = [Accept="application/json;odata=nometadata"],
     FnEncode = F_Globales[FnEncode],
 
-    // PASO 1: Listar carpetas del proyecto (Centro de Costos) — 1 llamada HTTP
-    FoldersUrl = SiteUrl & "/_api/web/GetFolderByServerRelativeUrl('" & FnEncode(BasePath) & "')/Folders?$select=Name",
-    CCFolders = let r = Json.Document(Web.Contents(FoldersUrl, [Headers=Headers]))
-                in Table.FromRecords(r[value]),
+    // PASO 1: Listar CCs del proyecto (1 llamada HTTP)
+    // Web.Contents con RelativePath/Query: el DataSourcePath queda anclado en SiteUrl,
+    // asi Power Query NO cachea URLs especificas que rompen al cambiar el codigo.
+    CCFolders = let
+        r = Json.Document(Web.Contents(SiteUrl, [
+            RelativePath = "/_api/web/GetFolderByServerRelativeUrl('" & FnEncode(BasePath) & "')/Folders",
+            Query = [#"$select" = "Name"],
+            Headers = Headers
+        ]))
+        in Table.FromRecords(r[value]),
 
-    // PASO 2: Para cada CC, listar archivos en /Actual/ — 1 llamada por CC
-    // Nota: SharePoint REST (OData v3) no soporta $expand anidado, no hay forma de reducir estas llamadas
+    // PASO 2: Listar archivos en /Actual/ de cada CC (1 llamada por CC)
+    // SharePoint REST (OData v3) no soporta $expand anidado, no se puede reducir a una sola llamada.
     WithFiles = Table.AddColumn(CCFolders, "Archivos", each
         let
             ccActualPath = BasePath & "/" & [Name] & "/Actual",
-            filesUrl = SiteUrl & "/_api/web/GetFolderByServerRelativeUrl('" & FnEncode(ccActualPath) & "')/Files?$select=Name,ServerRelativeUrl",
-            result = try Json.Document(Web.Contents(filesUrl, [Headers=Headers])) otherwise null
+            result = try Json.Document(Web.Contents(SiteUrl, [
+                RelativePath = "/_api/web/GetFolderByServerRelativeUrl('" & FnEncode(ccActualPath) & "')/Files",
+                Query = [#"$select" = "Name,ServerRelativeUrl"],
+                Headers = Headers
+            ])) otherwise null
         in
             if result <> null then Table.FromRecords(result[value]) else null
     ),
     ValidCCs = Table.SelectRows(WithFiles, each [Archivos] <> null),
 
-    // PASO 3: Expandir archivos
     Expanded = Table.ExpandTableColumn(ValidCCs, "Archivos", {"Name", "ServerRelativeUrl"}, {"FileName", "ServerRelativeUrl"}),
 
-    // PASO 4: Solo archivos relevantes (excluye temporales ~$)
+    // Filtra archivos relevantes (excluye temporales ~$)
     Relevant = Table.SelectRows(Expanded, each
         not Text.StartsWith([FileName], "~$") and (
         Text.Contains([FileName], "SEGUIMIENTO POR ITEMS",         Comparer.OrdinalIgnoreCase) or
@@ -36,12 +44,15 @@ let
         Text.Contains([FileName], "DESCUENTOS",                    Comparer.OrdinalIgnoreCase))
     ),
 
-    // PASO 5: Descargar binarios — Binary.Buffer evita re-descargas cuando multiples queries lo usan
+    // Descargar binarios — Binary.Buffer evita re-descargas cuando multiples queries lo consumen
     WithContent = Table.AddColumn(Relevant, "Content", each
-        Binary.Buffer(Web.Contents(SiteUrl & "/_api/web/GetFileByServerRelativeUrl('" & FnEncode([ServerRelativeUrl]) & "')/$value"))
+        Binary.Buffer(Web.Contents(SiteUrl, [
+            RelativePath = "/_api/web/GetFileByServerRelativeUrl('" & FnEncode([ServerRelativeUrl]) & "')/$value",
+            Headers = Headers
+        ]))
     ),
 
-    // PASO 6: Table.Buffer materializa TODO en memoria para que CONTRATOS, COMPRAS, DESCUENTOS
+    // Table.Buffer materializa todo en memoria para que CONTRATOS, COMPRAS, DESCUENTOS
     // y SP_Seguimiento_Parsed no re-disparen ninguna llamada HTTP
     Final = Table.Buffer(Table.RenameColumns(
         Table.SelectColumns(WithContent, {"Name", "FileName", "Content"}),

@@ -14,9 +14,10 @@ let
     FilePath = "/sites/MiGerenciaViv/Departamento Tecnico/COORDINACION DE PRESUPUESTOS/0. Descargas pptos - Control costos interno/Descarga ppto.xlsx",
 
     // Descargar el archivo Excel desde SharePoint
-    BinarioArchivo = Binary.Buffer(
-        Web.Contents(SiteUrl & "/_api/web/GetFileByServerRelativeUrl('" & FnEncode(FilePath) & "')/$value")
-    ),
+    // Web.Contents con RelativePath: DataSourcePath estable (SiteUrl), evita problemas de cache
+    BinarioArchivo = Binary.Buffer(Web.Contents(SiteUrl, [
+        RelativePath = "/_api/web/GetFileByServerRelativeUrl('" & FnEncode(FilePath) & "')/$value"
+    ])),
 
     // Abrir el libro y buscar la tabla DESCARGAS
     Libro = Excel.Workbook(BinarioArchivo, null, true),

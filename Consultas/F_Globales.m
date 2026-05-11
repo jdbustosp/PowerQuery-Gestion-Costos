@@ -142,10 +142,13 @@ let
                         if List.Count(matches) = 1 then matches{0} else proyectoExcel,
 
         // Descarga un Excel desde SharePoint y devuelve la primera hoja con headers promocionados.
+        // Web.Contents con RelativePath: DataSourcePath estable en siteUrl, evita cache de URLs especificas.
         // Devuelve null si la lectura falla, para que el caller decida la forma de la tabla vacia.
         FnReadSPExcel = (siteUrl as text, filePath as text) as nullable table =>
             let
-                binario = Web.Contents(siteUrl & "/_api/web/GetFileByServerRelativeUrl('" & FnEncode(filePath) & "')/$value"),
+                binario = Web.Contents(siteUrl, [
+                    RelativePath = "/_api/web/GetFileByServerRelativeUrl('" & FnEncode(filePath) & "')/$value"
+                ]),
                 libro = try Excel.Workbook(Binary.Buffer(binario), null, true) otherwise null
             in
                 if libro = null then null else Table.PromoteHeaders(libro{0}[Data], [PromoteAllScalars=true]),
