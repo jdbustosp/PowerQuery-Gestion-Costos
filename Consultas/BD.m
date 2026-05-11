@@ -39,11 +39,11 @@ let
     T_Compras = COMPRAS,
     T_Contratos = CONTRATOS,
     T_Ppto = PPTO_BD,
-    T_Comp = COMPARATIVOS,
+    T_Comp = try COMPARATIVOS otherwise #table({"Tipo"}, {}),
     T_Aprob = try APROBACIONES_SP otherwise #table({"Tipo"}, {}),
     T_Prov = try PROVISIONES_SP otherwise #table({"Tipo"}, {}),
-    T_Desc = DESCUENTOS,
-    T_Disp = DISPONIBLE,
+    T_Desc = try DESCUENTOS otherwise #table({"Tipo"}, {}),
+    T_Disp = try DISPONIBLE otherwise #table({"Tipo"}, {}),
 
     Origen = Table.Combine({T_Items, T_Compras, T_Contratos, T_Ppto, T_Comp, T_Aprob, T_Prov, T_Desc, T_Disp}),
 
