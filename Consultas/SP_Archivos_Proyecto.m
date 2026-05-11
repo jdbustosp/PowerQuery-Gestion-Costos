@@ -5,45 +5,47 @@ let
     Headers = [Accept="application/json;odata=nometadata"],
     FnEncode = F_Globales[FnEncode],
 
-    // 1 SOLA LLAMADA HTTP para listar CCs + subcarpeta /Actual/ + archivos.
-    // Antes: 1 llamada para CCs + 1 llamada por cada CC = N+1 llamadas.
-    // Ahora: 1 llamada total. Para 15 CCs ahorra ~45 segundos solo en latencia de red.
-    AllUrl = SiteUrl & "/_api/web/GetFolderByServerRelativeUrl('" & FnEncode(BasePath)
-        & "')/Folders?$top=500&$select=Name&$expand=Folders($top=20;$select=Name;$expand=Files($top=100;$select=Name,ServerRelativeUrl))",
-    CCList = Json.Document(Web.Contents(AllUrl, [Headers=Headers]))[value],
+    // PASO 1: Listar carpetas del proyecto (Centro de Costos) — 1 llamada HTTP
+    FoldersUrl = SiteUrl & "/_api/web/GetFolderByServerRelativeUrl('" & FnEncode(BasePath) & "')/Folders?$select=Name",
+    CCFolders = let r = Json.Document(Web.Contents(FoldersUrl, [Headers=Headers]))
+                in Table.FromRecords(r[value]),
 
-    // Aplanar estructura jerarquica: CC → /Actual/ → archivos
-    AllFileRows = List.Combine(List.Transform(CCList, (cc) =>
+    // PASO 2: Para cada CC, listar archivos en /Actual/ — 1 llamada por CC
+    // Nota: SharePoint REST (OData v3) no soporta $expand anidado, no hay forma de reducir estas llamadas
+    WithFiles = Table.AddColumn(CCFolders, "Archivos", each
         let
-            ccName = cc[Name],
-            subFolders = try cc[Folders][value] otherwise {},
-            actualFolder = List.First(List.Select(subFolders, each _[Name] = "Actual"), null),
-            files = if actualFolder = null then {} else try actualFolder[Files][value] otherwise {}
-        in List.Transform(files, (f) => [#"Centro de Costos" = ccName, #"Name" = f[Name], ServerRelativeUrl = f[ServerRelativeUrl]])
-    )),
+            ccActualPath = BasePath & "/" & [Name] & "/Actual",
+            filesUrl = SiteUrl & "/_api/web/GetFolderByServerRelativeUrl('" & FnEncode(ccActualPath) & "')/Files?$select=Name,ServerRelativeUrl",
+            result = try Json.Document(Web.Contents(filesUrl, [Headers=Headers])) otherwise null
+        in
+            if result <> null then Table.FromRecords(result[value]) else null
+    ),
+    ValidCCs = Table.SelectRows(WithFiles, each [Archivos] <> null),
 
-    FlatTable = if List.Count(AllFileRows) = 0
-        then #table({"Centro de Costos", "Name", "ServerRelativeUrl"}, {})
-        else Table.FromRecords(AllFileRows),
+    // PASO 3: Expandir archivos
+    Expanded = Table.ExpandTableColumn(ValidCCs, "Archivos", {"Name", "ServerRelativeUrl"}, {"FileName", "ServerRelativeUrl"}),
 
-    // Solo archivos relevantes (excluye temporales ~$)
-    Relevant = Table.SelectRows(FlatTable, each
-        not Text.StartsWith([Name], "~$") and (
-        Text.Contains([Name], "SEGUIMIENTO POR ITEMS",        Comparer.OrdinalIgnoreCase) or
-        Text.Contains([Name], "ANALISIS DE PRECIOS UNITARIOS", Comparer.OrdinalIgnoreCase) or
-        Text.Contains([Name], "INFORMEORDEN",                  Comparer.OrdinalIgnoreCase) or
-        Text.Contains([Name], "ESTADO DE ORDENES",             Comparer.OrdinalIgnoreCase) or
-        Text.Contains([Name], "ESTADO DE CONTRATOS",           Comparer.OrdinalIgnoreCase) or
-        Text.Contains([Name], "DESCUENTOS",                    Comparer.OrdinalIgnoreCase))
+    // PASO 4: Solo archivos relevantes (excluye temporales ~$)
+    Relevant = Table.SelectRows(Expanded, each
+        not Text.StartsWith([FileName], "~$") and (
+        Text.Contains([FileName], "SEGUIMIENTO POR ITEMS",         Comparer.OrdinalIgnoreCase) or
+        Text.Contains([FileName], "ANALISIS DE PRECIOS UNITARIOS", Comparer.OrdinalIgnoreCase) or
+        Text.Contains([FileName], "INFORMEORDEN",                  Comparer.OrdinalIgnoreCase) or
+        Text.Contains([FileName], "ESTADO DE ORDENES",             Comparer.OrdinalIgnoreCase) or
+        Text.Contains([FileName], "ESTADO DE CONTRATOS",           Comparer.OrdinalIgnoreCase) or
+        Text.Contains([FileName], "DESCUENTOS",                    Comparer.OrdinalIgnoreCase))
     ),
 
-    // Descargar binarios — Binary.Buffer evita re-descargas cuando multiples queries lo usan
+    // PASO 5: Descargar binarios — Binary.Buffer evita re-descargas cuando multiples queries lo usan
     WithContent = Table.AddColumn(Relevant, "Content", each
         Binary.Buffer(Web.Contents(SiteUrl & "/_api/web/GetFileByServerRelativeUrl('" & FnEncode([ServerRelativeUrl]) & "')/$value"))
     ),
 
-    // Table.Buffer materializa TODO en memoria para que CONTRATOS, COMPRAS, DESCUENTOS
+    // PASO 6: Table.Buffer materializa TODO en memoria para que CONTRATOS, COMPRAS, DESCUENTOS
     // y SP_Seguimiento_Parsed no re-disparen ninguna llamada HTTP
-    Final = Table.Buffer(Table.SelectColumns(WithContent, {"Centro de Costos", "Name", "Content"}))
+    Final = Table.Buffer(Table.RenameColumns(
+        Table.SelectColumns(WithContent, {"Name", "FileName", "Content"}),
+        {{"Name", "Centro de Costos"}, {"FileName", "Name"}}
+    ))
 in
     Final
