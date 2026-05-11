@@ -2,6 +2,9 @@ let
     Tol = 0.01,
     FnRemoveAccentsSymbols = F_Globales[FnRemoveAccentsSymbols],
     FnCleanContratista = F_Globales[FnCleanContratista],
+    ToNumber0 = (v as any) as number =>
+        let n = try Number.From(v) otherwise null
+        in if n = null then 0 else n,
 
     // ============================================================
     // CONSTANTES DE COLUMNAS
@@ -97,24 +100,24 @@ let
     ),
 
     // El "otherwise 0" del try ya cubre el caso null; no necesitamos doble guarda
-    NumerosSeguros = Table.TransformColumns(BaseClasificadaFinal, List.Transform(NumCols, each {_, (v) => try Number.From(v) otherwise 0, type number}), null, MissingField.Ignore),
+    NumerosSeguros = Table.TransformColumns(BaseClasificadaFinal, List.Transform(NumCols, each {_, ToNumber0, type number}), null, MissingField.Ignore),
 
     // try/otherwise 0 aqui porque NumerosSeguros puede dejar errores de conversion si la celda
     // fuente traia un valor no numerico que Number.From no pudo convertir
     AddCantAseg = Table.AddColumn(NumerosSeguros, "Cantidad asegurada",
-        each (try [Cantidad Contratado] otherwise 0) + (try [Cantidad Comprado] otherwise 0), type number),
+        each ToNumber0([Cantidad Contratado]) + ToNumber0([Cantidad Comprado]), type number),
     AddVTAseg = Table.AddColumn(AddCantAseg, "VT Asegurada",
-        each (try [VT Contratado] otherwise 0) + (try [VT Comprado] otherwise 0), type number),
+        each ToNumber0([VT Contratado]) + ToNumber0([VT Comprado]), type number),
     AddVUAseg = Table.Buffer(Table.AddColumn(AddVTAseg, "V/U asegurada",
-        each let qa = try [Cantidad asegurada] otherwise 0, vt = try [VT Asegurada] otherwise 0
+        each let qa = ToNumber0([Cantidad asegurada]), vt = ToNumber0([VT Asegurada])
             in if qa <> 0 then vt / qa else 0, type number)),
 
     // List.Transform con try protege List.Sum de valores Error en celdas individuales
     AgrupadoResumen = Table.Group(AddVUAseg, {"Centro de Costos", "Codigo act", "Ins"}, {
-        {"vtProj", each List.Sum(List.Transform([VT Proyectado],       each try _ otherwise 0)), type number},
-        {"vtCons", each List.Sum(List.Transform([VT Consumido],        each try _ otherwise 0)), type number},
-        {"vtAseg", each List.Sum(List.Transform([VT Asegurada],        each try _ otherwise 0)), type number},
-        {"vtAprb", each List.Sum(List.Transform([VR total aprobacion], each try _ otherwise 0)), type number}
+        {"vtProj", each List.Sum(List.Transform([VT Proyectado],       each ToNumber0(_))), type number},
+        {"vtCons", each List.Sum(List.Transform([VT Consumido],        each ToNumber0(_))), type number},
+        {"vtAseg", each List.Sum(List.Transform([VT Asegurada],        each ToNumber0(_))), type number},
+        {"vtAprb", each List.Sum(List.Transform([VR total aprobacion], each ToNumber0(_))), type number}
     }),
 
     // 🔥 EL MOTOR DE ESCENARIOS
@@ -158,6 +161,7 @@ let
     type number),
 
     FinalClean = Table.RemoveColumns(AplicarProyeccion, ColsBanderas, MissingField.Ignore),
-    TablaMaestraFinal = FinalClean
+    FinalSinErrores = Table.ReplaceErrorValues(FinalClean, List.Transform(Table.ColumnNames(FinalClean), each {_, null})),
+    TablaMaestraFinal = Table.Buffer(FinalSinErrores)
 in
     TablaMaestraFinal
