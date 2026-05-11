@@ -4,6 +4,8 @@ let
     // ============================================================
     FnFormatCodigoAct = F_Globales[FnFormatCodigoAct],
     FxToNumberFlex = F_Globales[FxToNumberFlex],
+    FnReadSPBinary = F_Globales[FnReadSPBinary],
+    SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
     Columnas_HTML = F_Globales[FnBuildColumnas](15),
 
     // ============================================================
@@ -30,14 +32,24 @@ let
     // ============================================================
     // CONEXIÓN A SHAREPOINT (LECTURA DESDE CONSULTA COMPARTIDA)
     // ============================================================
-    ArchivosProyecto = Table.SelectRows(SP_Archivos_Proyecto, each 
+    ArchivosProyecto = Table.SelectRows(SP_Archivos_Proyecto, each
         Text.Contains([Name], "DESCUENTOS", Comparer.OrdinalIgnoreCase)
     ),
     ConCentroCosto = ArchivosProyecto,
-    
-    // 🔥 EL SALVAVIDAS
-    Agrupado = Table.Group(ConCentroCosto, {"Centro de Costos"}, {{"Binario", each Binary.Buffer(_{0}[Content])}}),
-    TablaConDatos = Table.AddColumn(Agrupado, "Datos", each FxProcesarDescuentos([Binario])),
+
+    PickLatestBinary = (t as table, containsText as text) as nullable binary =>
+        let
+            candidatos = Table.Sort(
+                Table.SelectRows(t, each Text.Contains([Name], containsText, Comparer.OrdinalIgnoreCase)),
+                {{"TimeLastModified", Order.Descending}, {"Name", Order.Ascending}}
+            ),
+            path = if Table.RowCount(candidatos) = 0 then null else candidatos{0}[ServerRelativeUrl]
+        in
+            if path = null then null else FnReadSPBinary(SiteUrl, path),
+
+    Agrupado = Table.Group(ConCentroCosto, {"Centro de Costos"}, {{"Binario", each PickLatestBinary(_, "DESCUENTOS")}}),
+    CentrosConArchivo = Table.SelectRows(Agrupado, each [Binario] <> null),
+    TablaConDatos = Table.AddColumn(CentrosConArchivo, "Datos", each FxProcesarDescuentos([Binario])),
     
     SinBinario = Table.RemoveColumns(TablaConDatos, {"Binario"}),
     Expandido = Table.ExpandTableColumn(SinBinario, "Datos", {"# OC / Contrato", "Codigo act", "Valor descuento"}),

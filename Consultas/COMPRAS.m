@@ -7,6 +7,8 @@ let
     FxToNumberFlex = F_Globales[FxToNumberFlex],
     FnClaveLimpia = F_Globales[FnClaveLimpia],
     FnMapColumn = F_Globales[FnMapColumn],
+    FnReadSPBinary = F_Globales[FnReadSPBinary],
+    SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
     Columnas_OC = F_Globales[FnBuildColumnas](10),
 
     // ============================================================
@@ -39,13 +41,29 @@ let
     // ============================================================
     // CONEXIÓN A SHAREPOINT (LECTURA DESDE CONSULTA COMPARTIDA)
     // ============================================================
-    ArchivosProyecto = Table.SelectRows(SP_Archivos_Proyecto, each 
-        Text.Contains([Name], "INFORMEORDEN", Comparer.OrdinalIgnoreCase) or 
+    ArchivosProyecto = Table.SelectRows(SP_Archivos_Proyecto, each
+        Text.Contains([Name], "INFORMEORDEN", Comparer.OrdinalIgnoreCase) or
         Text.Contains([Name], "ESTADO DE ORDENES", Comparer.OrdinalIgnoreCase)
     ),
     ConCentroCosto = ArchivosProyecto,
-    
-    Agrupado = Table.Group(ConCentroCosto, {"Centro de Costos"}, {{"Binarios", each let FilaDet = Table.SelectRows(_, each Text.Contains(Text.Upper([Name]), "INFORMEORDEN")), FilaOC = Table.SelectRows(_, each Text.Contains(Text.Upper([Name]), "ESTADO DE ORDENES")) in if Table.RowCount(FilaDet) > 0 and Table.RowCount(FilaOC) > 0 then [Bin_Det = Binary.Buffer(FilaDet{0}[Content]), Bin_OC = Binary.Buffer(FilaOC{0}[Content])] else null}}),
+
+    PickLatestBinary = (t as table, containsText as text) as nullable binary =>
+        let
+            candidatos = Table.Sort(
+                Table.SelectRows(t, each Text.Contains([Name], containsText, Comparer.OrdinalIgnoreCase)),
+                {{"TimeLastModified", Order.Descending}, {"Name", Order.Ascending}}
+            ),
+            path = if Table.RowCount(candidatos) = 0 then null else candidatos{0}[ServerRelativeUrl]
+        in
+            if path = null then null else FnReadSPBinary(SiteUrl, path),
+
+    Agrupado = Table.Group(ConCentroCosto, {"Centro de Costos"}, {{"Binarios", each
+        let
+            binDet = PickLatestBinary(_, "INFORMEORDEN"),
+            binOC = PickLatestBinary(_, "ESTADO DE ORDENES")
+        in
+            if binDet <> null and binOC <> null then [Bin_Det = binDet, Bin_OC = binOC] else null
+    }}),
     CentrosCompletos = Table.SelectRows(Agrupado, each [Binarios] <> null),
     TablaConDatos = Table.AddColumn(CentrosCompletos, "Datos", each FxProcesarCompras([Binarios][Bin_Det], [Binarios][Bin_OC])),
     Expandido = Table.ExpandTableColumn(TablaConDatos, "Datos", {"Codigo ins", "Ins", "Actividad", "Codigo act", "InsClave", "# OC / Contrato", "Cantidad Comprado", "VT Comprado", "VU_Crudo", "IVA_Crudo", "Nombre Contratista"}),

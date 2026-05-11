@@ -124,18 +124,29 @@ let
 
         FnMapColumn = (rec as record, cols as list, keywords as list) =>
             let
-                match = List.First(List.Select(cols, (c) =>
-                    List.AnyTrue(List.Transform(keywords, (k) => Text.Contains(Text.Upper(c), k)))))
+                norm = (x as any) as text =>
+                    let
+                        txt = try Text.From(x) otherwise "",
+                        clean = FnRemoveAccentsSymbols(txt)
+                    in Text.Upper(if clean = null then "" else clean),
+                match = List.First(
+                    List.Select(cols, (c) =>
+                        List.AnyTrue(List.Transform(keywords, (k) => Text.Contains(norm(c), norm(k))))
+                    ),
+                    null
+                )
             in if match = null then null else Record.Field(rec, match),
 
         FnBuildFolderPrefixMap = (carpetas as list) as record =>
             let
-                pares   = List.Transform(carpetas, (x) =>
-                    let prefix = if Text.Contains(x, "-") then Text.Trim(Text.BeforeDelimiter(x, "-")) else x
-                    in {prefix, x}),
-                claves  = List.Transform(pares, each _{0}),
-                valores = List.Transform(pares, each _{1})
-            in Record.FromList(valores, claves),
+                pares = List.Transform(carpetas, (x) =>
+                    let
+                        nombre = try Text.From(x) otherwise "",
+                        prefix = if Text.Contains(nombre, "-") then Text.Trim(Text.BeforeDelimiter(nombre, "-")) else Text.Trim(nombre)
+                    in {prefix, nombre}),
+                validos = List.Select(pares, each _{0} <> null and _{0} <> ""),
+                tabla = Table.Distinct(Table.FromRows(validos, {"Clave", "Valor"}), {"Clave"})
+            in Record.FromList(tabla[Valor], tabla[Clave]),
 
         FnMatchFolder = (proyectoExcel as text, listaCarpetas as list) as text =>
             let
@@ -159,15 +170,27 @@ let
                         )
                     in if List.Count(matches) = 1 then matches{0} else proyectoExcel,
 
+        FnReadSPBinary = (siteUrl as text, filePath as text) as nullable binary =>
+            let
+                raw = try Web.Contents(siteUrl, [
+                    RelativePath = "/_api/web/GetFileByServerRelativeUrl('" & FnEncode(filePath) & "')/$value",
+                    Headers = [Accept = "*/*"],
+                    Timeout = #duration(0, 0, 10, 0),
+                    ManualStatusHandling = {404, 429, 500, 502, 503, 504}
+                ]) otherwise null,
+                status = if raw = null then null else try Value.Metadata(raw)[Response.Status] otherwise 200,
+                result = if raw = null or status >= 400 then null else Binary.Buffer(raw)
+            in
+                result,
+
         FnReadSPExcel = (siteUrl as text, filePath as text) as nullable table =>
             let
-                binario = Web.Contents(siteUrl, [
-                    RelativePath = "/_api/web/GetFileByServerRelativeUrl('" & FnEncode(filePath) & "')/$value"
-                ]),
-                libro = try Excel.Workbook(Binary.Buffer(binario), null, true) otherwise null
+                binario = FnReadSPBinary(siteUrl, filePath),
+                libro = if binario = null then null else try Excel.Workbook(binario, null, true) otherwise null,
+                data = if libro = null or Table.RowCount(libro) = 0 then null else try libro{0}[Data] otherwise null,
+                result = if data = null then null else try Table.PromoteHeaders(data, [PromoteAllScalars=true]) otherwise null
             in
-                if libro = null then null
-                else Table.PromoteHeaders(libro{0}[Data], [PromoteAllScalars=true]),
+                result,
 
         FxProcesarCentroCosto = (BinarioSeguimiento as binary, BinarioPresupuesto as binary) as table =>
             let

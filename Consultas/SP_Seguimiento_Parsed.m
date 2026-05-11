@@ -5,14 +5,27 @@ let
     // PPTO_TODOS_PROYECTOS.
     // =========================================================
     FxProcesarCentroCosto = F_Globales[FxProcesarCentroCosto],
+    FnReadSPBinary = F_Globales[FnReadSPBinary],
+    SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
 
     ConCentroCosto = SP_Archivos_Proyecto,
-    Agrupado = Table.Group(ConCentroCosto, {"Centro de Costos"}, {{"Binarios", each let
-        FilaPres = Table.SelectRows(_, each Text.Contains([Name], "ANALISIS DE PRECIOS UNITARIOS", Comparer.OrdinalIgnoreCase)),
-        FilaSeg = Table.SelectRows(_, each Text.Contains([Name], "SEGUIMIENTO POR ITEMS", Comparer.OrdinalIgnoreCase))
-        in if Table.RowCount(FilaPres) > 0 and Table.RowCount(FilaSeg) > 0
-        then [Bin_P = Binary.Buffer(FilaPres{0}[Content]), Bin_S = Binary.Buffer(FilaSeg{0}[Content])]
-        else null
+
+    PickLatestBinary = (t as table, containsText as text) as nullable binary =>
+        let
+            candidatos = Table.Sort(
+                Table.SelectRows(t, each Text.Contains([Name], containsText, Comparer.OrdinalIgnoreCase)),
+                {{"TimeLastModified", Order.Descending}, {"Name", Order.Ascending}}
+            ),
+            path = if Table.RowCount(candidatos) = 0 then null else candidatos{0}[ServerRelativeUrl]
+        in
+            if path = null then null else FnReadSPBinary(SiteUrl, path),
+
+    Agrupado = Table.Group(ConCentroCosto, {"Centro de Costos"}, {{"Binarios", each
+        let
+            binPres = PickLatestBinary(_, "ANALISIS DE PRECIOS UNITARIOS"),
+            binSeg = PickLatestBinary(_, "SEGUIMIENTO POR ITEMS")
+        in
+            if binPres <> null and binSeg <> null then [Bin_P = binPres, Bin_S = binSeg] else null
     }}),
     CentrosCompletos = Table.SelectRows(Agrupado, each [Binarios] <> null),
     TablaConDatos = Table.AddColumn(CentrosCompletos, "Datos", each FxProcesarCentroCosto([Binarios][Bin_S], [Binarios][Bin_P])),
