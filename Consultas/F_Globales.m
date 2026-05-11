@@ -32,17 +32,18 @@ let
                 if valUS<>null then valUS else
                 let tryES = try Number.FromText(t, "es-ES"), valES = if tryES[HasError] then null else tryES[Value] in valES,
 
-        // Incluye Ñ/ñ (faltaba) y mantiene las mojibakes UTF-8 mal interpretadas
-        FnRemoveAccentsSymbols = (t as nullable text) as nullable text =>
-            if t = null then null
+        // Incluye Ñ/ñ y mantiene las mojibakes UTF-8 mal interpretadas
+        // El try inicial protege contra entradas Error/Record/List que romperian Text.From
+        FnRemoveAccentsSymbols = (t as any) as nullable text =>
+            let initial = try (if t = null then null else Text.From(t)) otherwise null in
+            if initial = null then null
             else let
-                initial = Text.From(t),
                 replacements = {
-                    {"á","a"},{"Á","A"},{"é","e"},{"É","E"},{"í","i"},{"Í","I"},{"ó","o"},{"Ó","O"},{"ú","u"},{"Ú","U"},
-                    {"ñ","n"},{"Ñ","N"},
-                    {"º",""},{"°",""},{"¨",""},
-                    {"Ã“","O"}, {"Ã‘","N"}, {"Ã¡","A"}, {"Ã©","E"}, {"Ã³","O"}, {"Ãº","U"}, {"Ã","A"},
-                    {"#(lf)", " "}, {"#(cr)", " "}
+                    {“á”,”a”},{“Á”,”A”},{“é”,”e”},{“É”,”E”},{“í”,”i”},{“Í”,”I”},{“ó”,”o”},{“Ó”,”O”},{“ú”,”u”},{“Ú”,”U”},
+                    {“ñ”,”n”},{“Ñ”,”N”},
+                    {“º”,””},{“°”,””},{“¨”,””},
+                    {“Ã””,”O”}, {“Ã’”,”N”}, {“Ã¡”,”A”}, {“Ã©”,”E”}, {“Ã³”,”O”}, {“Ãº”,”U”}, {“Ã”,”A”},
+                    {“#(lf)”, “ “}, {“#(cr)”, “ “}
                 },
                 result = List.Accumulate(replacements, initial, (state, current) => Text.Replace(state, current{0}, current{1}))
             in result,
@@ -56,12 +57,12 @@ let
                 t3 = Text.Select(t2, {"A".."Z", "0".."9"})
             in if t3 = "" then null else t3,
 
+        // try defensivo: si t es Error/Record/List, Text.From lanza excepcion → devolvemos null
         FnCleanText = (t as any) as nullable text =>
-            if t = null then null else let txt = Text.Trim(Text.From(t)) in if txt = "" then null else Text.Upper(txt),
+            try (if t = null then null else let txt = Text.Trim(Text.From(t)) in if txt = "" then null else Text.Upper(txt)) otherwise null,
 
-        // Trim sin uppercase (helper para reemplazar el patrón repetido en 9 archivos)
         FnTrimText = (t as any) as nullable text =>
-            if t = null then null else Text.Trim(Text.From(t)),
+            try (if t = null then null else Text.Trim(Text.From(t))) otherwise null,
 
         FnPrepareTableWithHeader = (tbl as table) as table =>
             let
@@ -78,11 +79,12 @@ let
 
         FnBuildColumnas = (n as number) as list => List.Transform({1..n}, each {"Columna " & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}),
 
-        FnCleanContratista = (t as nullable text) as nullable text =>
-            if t = null then null
+        FnCleanContratista = (t as any) as nullable text =>
+            let safe = try (if t = null then null else Text.From(t)) otherwise null in
+            if safe = null then null
             else let
                 // Reemplazo del caracter raro de codificacion (U+FFFD) por la letra N mayuscula (Ascii 78)
-                t2 = Text.Replace(t, Character.FromNumber(65533), Character.FromNumber(78)),
+                t2 = Text.Replace(safe, Character.FromNumber(65533), Character.FromNumber(78)),
                 // Texto en mayusculas sin espacios a los lados
                 t3 = Text.Trim(Text.Upper(t2)),
                 // Limpieza de acentos basica manualmente para evitar referencia ciclica

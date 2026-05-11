@@ -47,16 +47,24 @@ let
 
     Origen = Table.Combine({T_Items, T_Compras, T_Contratos, T_Ppto, T_Comp, T_Aprob, T_Prov, T_Desc, T_Disp}),
 
-    ColumnasReordenadas = Table.SelectColumns(Origen, ColumnasOrden, MissingField.Ignore),
+    // RED DE SEGURIDAD CRITICA: cualquier valor Error que venga de las fuentes (COMPRAS, CONTRATOS,
+    // DESCUENTOS, COMPARATIVOS, etc) lo convertimos a null antes de procesar. Esto neutraliza
+    // los miles de errores que Power Query rastrea (cada uno es costoso) y permite que el
+    // resto del pipeline use sus rutas null-safe normales.
+    OrigenLimpio = Table.ReplaceErrorValues(Origen,
+        List.Transform(Table.ColumnNames(Origen), each {_, null})),
 
+    ColumnasReordenadas = Table.SelectColumns(OrigenLimpio, ColumnasOrden, MissingField.Ignore),
+
+    // try/otherwise en cada transformacion: si Text.From recibe algo raro (record, list, etc) no rompe
     LlavesLimpias = Table.TransformColumns(ColumnasReordenadas, {
-        {"Centro de Costos", each if _ = null then "" else Text.Upper(Text.Trim(Text.From(_))), type text},
-        {"Codigo act", each if _ = null then "" else Text.Upper(Text.Trim(Text.From(_))), type text},
-        {"Ins", each if _ = null then "" else Text.Upper(Text.Trim(Text.From(_))), type text},
-        {"Tipo", each if _ = null then "" else Text.Upper(Text.Trim(Text.From(_))), type text},
-        {"# OC / Contrato", each if _ = null then null else Text.Trim(Text.From(_)), type text},
-        {"Nombre Contratista", each FnCleanContratista(_), type text},
-        {"Descripcion contrato", each FnRemoveAccentsSymbols(if _ = null then null else Text.Trim(Text.From(_))), type text}
+        {"Centro de Costos",     each try (if _ = null then "" else Text.Upper(Text.Trim(Text.From(_)))) otherwise "", type text},
+        {"Codigo act",           each try (if _ = null then "" else Text.Upper(Text.Trim(Text.From(_)))) otherwise "", type text},
+        {"Ins",                  each try (if _ = null then "" else Text.Upper(Text.Trim(Text.From(_)))) otherwise "", type text},
+        {"Tipo",                 each try (if _ = null then "" else Text.Upper(Text.Trim(Text.From(_)))) otherwise "", type text},
+        {"# OC / Contrato",      each try (if _ = null then null else Text.Trim(Text.From(_))) otherwise null, type text},
+        {"Nombre Contratista",   each try FnCleanContratista(_) otherwise null, type text},
+        {"Descripcion contrato", each try FnRemoveAccentsSymbols(if _ = null then null else Text.Trim(Text.From(_))) otherwise null, type text}
     }, null, MissingField.Ignore),
 
     FiltroTipoValido = Table.SelectRows(LlavesLimpias, each [Tipo] <> null and [Tipo] <> ""),
@@ -64,10 +72,10 @@ let
     // 🚀 Lookup por Record para Clasificadores (O(1) por fila en vez de JOIN O(N))
     ClasificadorRows = Table.SelectRows(
         Table.Distinct(
-            Table.SelectColumns(FiltroTipoValido, {"Centro de Costos", "Codigo act", "Ins", "Clasificador"}),
+            Table.SelectColumns(FiltroTipoValido, {"Centro de Costos", "Codigo act", "Ins", "Clasificador"}, MissingField.Ignore),
             {"Centro de Costos", "Codigo act", "Ins"}
         ),
-        each [Clasificador] <> null and Text.Trim(Text.From([Clasificador])) <> ""
+        each try ([Clasificador] <> null and Text.Trim(Text.From([Clasificador])) <> "") otherwise false
     ),
     ClasificadorKeys = List.Transform(Table.ToRecords(Table.SelectColumns(ClasificadorRows, {"Centro de Costos", "Codigo act", "Ins"})), each [Centro de Costos] & "|" & [Codigo act] & "|" & [Ins]),
     ClasificadorMap = Record.FromList(ClasificadorRows[Clasificador], ClasificadorKeys),
