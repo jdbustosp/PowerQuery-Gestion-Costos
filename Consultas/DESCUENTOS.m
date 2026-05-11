@@ -12,7 +12,7 @@ let
     FxProcesarDescuentos = (Binario as binary) =>
         let
             RawTable_0 = try Excel.Workbook(Binario, null, true){0}[Data]
-                       otherwise Html.Table(Text.FromBinary(Binario, 1252), Columnas_HTML, [RowSelector="tr"]),
+                       otherwise Html.Table(Text.FromBinary(Binario, 65001), Columnas_HTML, [RowSelector="tr"]),
             // Estandarizar nombres de columnas
             RawTable_ColNames = Table.ColumnNames(RawTable_0),
             RawTable = Table.RenameColumns(RawTable_0, List.Zip({RawTable_ColNames, List.Transform({1..List.Count(RawTable_ColNames)}, each "Columna" & Text.From(_))})),

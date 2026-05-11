@@ -6,7 +6,7 @@ let
     FnPrepareTableWithHeader = F_Globales[FnPrepareTableWithHeader],
     FxToNumberFlex = F_Globales[FxToNumberFlex],
     FnClaveLimpia = F_Globales[FnClaveLimpia],
-    FnMapColumn = (rec as record, cols as list, keywords as list) => let match = List.First(List.Select(cols, (c) => List.AnyTrue(List.Transform(keywords, (k) => Text.Contains(Text.Upper(c), k))))) in if match = null then null else Record.Field(rec, match),
+    FnMapColumn = F_Globales[FnMapColumn],
     Columnas_OC = F_Globales[FnBuildColumnas](10),
 
     // ============================================================

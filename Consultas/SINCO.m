@@ -5,10 +5,12 @@ let
     FnRemoveAccentsSymbols = F_Globales[FnRemoveAccentsSymbols],
 
     ListaOC_Excluir = List.Distinct(List.RemoveNulls(List.Transform(try TablaComparativo[#"# OC / Contrato"] otherwise {}, each if _ = null or Text.Trim(Text.From(_)) = "" then null else Text.Trim(Text.From(_))))),
+    // Lookup O(1) en vez de List.Contains O(n) por fila
+    SetOC = Record.FromList(List.Repeat({true}, List.Count(ListaOC_Excluir)), ListaOC_Excluir),
 
-    FiltroExclusion = Table.SelectRows(Source, each 
-        (Text.Upper(if [Tipo] = null then "" else [Tipo]) <> "PPTO") and 
-        (let ocText = if [#"# OC / Contrato"] = null then "" else Text.Trim(Text.From([#"# OC / Contrato"])) in ocText = "" or not List.Contains(ListaOC_Excluir, ocText))
+    FiltroExclusion = Table.SelectRows(Source, each
+        (Text.Upper(if [Tipo] = null then "" else [Tipo]) <> "PPTO") and
+        (let ocText = if [#"# OC / Contrato"] = null then "" else Text.Trim(Text.From([#"# OC / Contrato"])) in ocText = "" or not Record.HasFields(SetOC, {ocText}))
     ),
 
     // Filtro de ceros: solo VT Asegurada (ya no hay columnas PPTO)

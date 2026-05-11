@@ -14,7 +14,7 @@ let
         let
             // 🚀 Excel.Workbook es más rápido que Html.Table
             Source_Raw = try Excel.Workbook(BinarioCortes, null, true){0}[Data]
-                     otherwise Html.Table(Text.FromBinary(BinarioCortes, 1252), Columnas_HTML, [RowSelector="tr"]),
+                     otherwise Html.Table(Text.FromBinary(BinarioCortes, 65001), Columnas_HTML, [RowSelector="tr"]),
             // Estandarizar nombres de columnas
             Source_ColNames = Table.ColumnNames(Source_Raw),
             Source = Table.RenameColumns(Source_Raw, List.Zip({Source_ColNames, List.Transform({1..List.Count(Source_ColNames)}, each "Columna" & Text.From(_))})),
