@@ -163,9 +163,8 @@ let
     FinalClean = Table.RemoveColumns(AplicarProyeccion, ColsBanderas, MissingField.Ignore),
     FinalSinErrores = Table.ReplaceErrorValues(FinalClean, List.Transform(Table.ColumnNames(FinalClean), each {_, null})),
 
-    // Campo para tablas dinamicas: permite filtrar por No_Prov y ver tambien
-    // contratos, compras, descuentos y demas filas relacionadas. Primero cruza
-    // por OC normalizada; si no hay match, usa el centro de costos como respaldo.
+    // Campo para tablas dinamicas: relaciona No_Prov solo por OC normalizada.
+    // No replica por centro de costos porque eso infla las sumas.
     CleanKeyText = (v as any) as nullable text =>
         let t = try Text.Upper(Text.Trim(Text.From(v))) otherwise null
         in if t = null or t = "" then null else t,
@@ -177,40 +176,25 @@ let
             if digits <> null and digits <> "" then digits else t,
 
     RelKeys1 = Table.AddColumn(FinalSinErrores, "__OC_Key", each CleanOCKey([#"# OC / Contrato"]), type text),
-    RelKeys2 = Table.AddColumn(RelKeys1, "__CC_Key", each CleanKeyText([Centro de Costos]), type text),
-    RelKeys = Table.AddColumn(RelKeys2, "__NoProv_Key", each CleanKeyText([No_Prov]), type text),
+    RelKeys = Table.AddColumn(RelKeys1, "__NoProv_Key", each CleanKeyText([No_Prov]), type text),
 
     ProvisionesPorOC = Table.Buffer(Table.Group(
         Table.SelectRows(RelKeys, each [__OC_Key] <> null and [__NoProv_Key] <> null),
         {"__OC_Key"},
-        {{"No_Prov Lista OC", each List.Sort(List.Distinct(List.RemoveNulls([__NoProv_Key]))), type list}}
-    )),
-    ProvisionesPorCC = Table.Buffer(Table.Group(
-        Table.SelectRows(RelKeys, each [__CC_Key] <> null and [__NoProv_Key] <> null),
-        {"__CC_Key"},
-        {{"No_Prov Lista CC", each List.Sort(List.Distinct(List.RemoveNulls([__NoProv_Key]))), type list}}
+        {{"No_Prov OC", each
+            let nums = List.Sort(List.Distinct(List.RemoveNulls([__NoProv_Key])))
+            in if List.IsEmpty(nums) then null else nums{0},
+            type text
+        }}
     )),
 
     CruceNoProvOC = Table.NestedJoin(RelKeys, {"__OC_Key"}, ProvisionesPorOC, {"__OC_Key"}, "NPOC", JoinKind.LeftOuter),
-    ExpandNoProvOC = Table.ExpandTableColumn(CruceNoProvOC, "NPOC", {"No_Prov Lista OC"}, {"No_Prov Lista OC"}),
-    CruceNoProvCC = Table.NestedJoin(ExpandNoProvOC, {"__CC_Key"}, ProvisionesPorCC, {"__CC_Key"}, "NPCC", JoinKind.LeftOuter),
-    ExpandNoProvCC = Table.ExpandTableColumn(CruceNoProvCC, "NPCC", {"No_Prov Lista CC"}, {"No_Prov Lista CC"}),
-
-    AddNoProvFiltroLista = Table.AddColumn(ExpandNoProvCC, "No_Prov Filtro Lista", each
-        let
-            propio = [__NoProv_Key],
-            listaOC = try [No_Prov Lista OC] otherwise null,
-            listaCC = try [No_Prov Lista CC] otherwise null
-        in
-            if propio <> null and propio <> "" then {propio}
-            else if Value.Is(listaOC, type list) and not List.IsEmpty(listaOC) then listaOC
-            else if Value.Is(listaCC, type list) and not List.IsEmpty(listaCC) then listaCC
-            else {null},
-        type list
+    ExpandNoProvOC = Table.ExpandTableColumn(CruceNoProvOC, "NPOC", {"No_Prov OC"}, {"No_Prov OC"}),
+    AddNoProvFiltro = Table.AddColumn(ExpandNoProvOC, "No_Prov Filtro", each
+        if [__NoProv_Key] <> null and [__NoProv_Key] <> "" then [__NoProv_Key] else [No_Prov OC],
+        type text
     ),
-    ExpandNoProvFiltro = Table.ExpandListColumn(AddNoProvFiltroLista, "No_Prov Filtro Lista"),
-    RenameNoProvFiltro = Table.RenameColumns(ExpandNoProvFiltro, {{"No_Prov Filtro Lista", "No_Prov Filtro"}}, MissingField.Ignore),
-    FinalConNoProvFiltro = Table.RemoveColumns(RenameNoProvFiltro, {"__OC_Key", "__CC_Key", "__NoProv_Key", "No_Prov Lista OC", "No_Prov Lista CC"}, MissingField.Ignore),
+    FinalConNoProvFiltro = Table.RemoveColumns(AddNoProvFiltro, {"__OC_Key", "__NoProv_Key", "No_Prov OC"}, MissingField.Ignore),
     TablaMaestraFinal = Table.Buffer(FinalConNoProvFiltro)
 in
     TablaMaestraFinal
