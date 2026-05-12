@@ -195,6 +195,13 @@ let
         type text
     ),
     FinalConNoProvFiltro = Table.RemoveColumns(AddNoProvFiltro, {"__OC_Key", "__NoProv_Key", "No_Prov OC"}, MissingField.Ignore),
-    TablaMaestraFinal = Table.Buffer(FinalConNoProvFiltro)
+    FinalOCLimpia = Table.TransformColumns(FinalConNoProvFiltro, {
+        {"# OC / Contrato", each
+            let oc = try Text.Trim(Text.From(_)) otherwise ""
+            in if oc = "" then "SIN OC / CONTRATO" else oc,
+            type text
+        }
+    }, null, MissingField.Ignore),
+    TablaMaestraFinal = Table.Buffer(FinalOCLimpia)
 in
     TablaMaestraFinal
