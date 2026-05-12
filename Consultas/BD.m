@@ -165,32 +165,34 @@ let
 
     // Campo para tablas dinamicas: permite filtrar por No_Prov y ver tambien
     // contratos, compras, descuentos y demas filas que comparten la misma OC.
-    // Debe ser un solo valor para que el segmentador no muestre listas concatenadas.
+    // Si una OC tiene varias provisiones, las filas no-provision se replican
+    // una vez por provision para que el segmentador tenga valores individuales.
     ProvisionesPorOC = Table.Buffer(Table.Group(
         Table.SelectRows(FinalSinErrores, each
             [#"# OC / Contrato"] <> null and Text.Trim(Text.From([#"# OC / Contrato"])) <> "" and
             [No_Prov] <> null and Text.Trim(Text.From([No_Prov])) <> ""
         ),
         {"# OC / Contrato"},
-        {{"No_Prov Por OC", each
-            let
-                nums = List.Sort(List.Distinct(List.Transform(List.RemoveNulls([No_Prov]), each Text.Trim(Text.From(_)))))
-            in
-                if List.IsEmpty(nums) then null else nums{0},
-            type text
+        {{"No_Prov Lista OC", each
+            List.Sort(List.Distinct(List.Transform(List.RemoveNulls([No_Prov]), each Text.Trim(Text.From(_))))),
+            type list
         }}
     )),
     CruceNoProv = Table.NestedJoin(FinalSinErrores, {"# OC / Contrato"}, ProvisionesPorOC, {"# OC / Contrato"}, "NP", JoinKind.LeftOuter),
-    ExpandNoProv = Table.ExpandTableColumn(CruceNoProv, "NP", {"No_Prov Por OC"}, {"No_Prov Por OC"}),
-    AddNoProvFiltro = Table.AddColumn(ExpandNoProv, "No_Prov Filtro", each
+    ExpandNoProv = Table.ExpandTableColumn(CruceNoProv, "NP", {"No_Prov Lista OC"}, {"No_Prov Lista OC"}),
+    AddNoProvFiltroLista = Table.AddColumn(ExpandNoProv, "No_Prov Filtro Lista", each
         let
-            porOC = try Text.Trim(Text.From([No_Prov Por OC])) otherwise "",
-            propio = try Text.Trim(Text.From([No_Prov])) otherwise ""
+            propio = try Text.Trim(Text.From([No_Prov])) otherwise "",
+            listaOC = try [No_Prov Lista OC] otherwise null
         in
-            if propio <> "" then propio else if porOC <> "" then porOC else null,
-        type text
+            if propio <> "" then {propio}
+            else if Value.Is(listaOC, type list) and not List.IsEmpty(listaOC) then listaOC
+            else {null},
+        type list
     ),
-    FinalConNoProvFiltro = Table.RemoveColumns(AddNoProvFiltro, {"No_Prov Por OC"}, MissingField.Ignore),
+    ExpandNoProvFiltro = Table.ExpandListColumn(AddNoProvFiltroLista, "No_Prov Filtro Lista"),
+    RenameNoProvFiltro = Table.RenameColumns(ExpandNoProvFiltro, {{"No_Prov Filtro Lista", "No_Prov Filtro"}}, MissingField.Ignore),
+    FinalConNoProvFiltro = Table.RemoveColumns(RenameNoProvFiltro, {"No_Prov Lista OC"}, MissingField.Ignore),
     TablaMaestraFinal = Table.Buffer(FinalConNoProvFiltro)
 in
     TablaMaestraFinal
