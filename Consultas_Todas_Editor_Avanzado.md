@@ -258,6 +258,7 @@ let
 
     // Campo para tablas dinamicas: permite filtrar por No_Prov y ver tambien
     // contratos, compras, descuentos y demas filas que comparten la misma OC.
+    // Debe ser un solo valor para que el segmentador no muestre listas concatenadas.
     ProvisionesPorOC = Table.Buffer(Table.Group(
         Table.SelectRows(FinalSinErrores, each
             [#"# OC / Contrato"] <> null and Text.Trim(Text.From([#"# OC / Contrato"])) <> "" and
@@ -265,14 +266,10 @@ let
         ),
         {"# OC / Contrato"},
         {{"No_Prov Por OC", each
-            Text.Combine(
-                List.Sort(
-                    List.Distinct(
-                        List.Transform(List.RemoveNulls([No_Prov]), each Text.Trim(Text.From(_)))
-                    )
-                ),
-                ", "
-            ),
+            let
+                nums = List.Sort(List.Distinct(List.Transform(List.RemoveNulls([No_Prov]), each Text.Trim(Text.From(_)))))
+            in
+                if List.IsEmpty(nums) then null else nums{0},
             type text
         }}
     )),
@@ -283,7 +280,7 @@ let
             porOC = try Text.Trim(Text.From([No_Prov Por OC])) otherwise "",
             propio = try Text.Trim(Text.From([No_Prov])) otherwise ""
         in
-            if porOC <> "" then porOC else if propio <> "" then propio else null,
+            if propio <> "" then propio else if porOC <> "" then porOC else null,
         type text
     ),
     FinalConNoProvFiltro = Table.RemoveColumns(AddNoProvFiltro, {"No_Prov Por OC"}, MissingField.Ignore),
