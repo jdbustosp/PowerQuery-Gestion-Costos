@@ -255,7 +255,39 @@ let
 
     FinalClean = Table.RemoveColumns(AplicarProyeccion, ColsBanderas, MissingField.Ignore),
     FinalSinErrores = Table.ReplaceErrorValues(FinalClean, List.Transform(Table.ColumnNames(FinalClean), each {_, null})),
-    TablaMaestraFinal = Table.Buffer(FinalSinErrores)
+
+    // Campo para tablas dinamicas: permite filtrar por No_Prov y ver tambien
+    // contratos, compras, descuentos y demas filas que comparten la misma OC.
+    ProvisionesPorOC = Table.Buffer(Table.Group(
+        Table.SelectRows(FinalSinErrores, each
+            [#"# OC / Contrato"] <> null and Text.Trim(Text.From([#"# OC / Contrato"])) <> "" and
+            [No_Prov] <> null and Text.Trim(Text.From([No_Prov])) <> ""
+        ),
+        {"# OC / Contrato"},
+        {{"No_Prov Por OC", each
+            Text.Combine(
+                List.Sort(
+                    List.Distinct(
+                        List.Transform(List.RemoveNulls([No_Prov]), each Text.Trim(Text.From(_)))
+                    )
+                ),
+                ", "
+            ),
+            type text
+        }}
+    )),
+    CruceNoProv = Table.NestedJoin(FinalSinErrores, {"# OC / Contrato"}, ProvisionesPorOC, {"# OC / Contrato"}, "NP", JoinKind.LeftOuter),
+    ExpandNoProv = Table.ExpandTableColumn(CruceNoProv, "NP", {"No_Prov Por OC"}, {"No_Prov Por OC"}),
+    AddNoProvFiltro = Table.AddColumn(ExpandNoProv, "No_Prov Filtro", each
+        let
+            porOC = try Text.Trim(Text.From([No_Prov Por OC])) otherwise "",
+            propio = try Text.Trim(Text.From([No_Prov])) otherwise ""
+        in
+            if porOC <> "" then porOC else if propio <> "" then propio else null,
+        type text
+    ),
+    FinalConNoProvFiltro = Table.RemoveColumns(AddNoProvFiltro, {"No_Prov Por OC"}, MissingField.Ignore),
+    TablaMaestraFinal = Table.Buffer(FinalConNoProvFiltro)
 in
     TablaMaestraFinal
 ```
