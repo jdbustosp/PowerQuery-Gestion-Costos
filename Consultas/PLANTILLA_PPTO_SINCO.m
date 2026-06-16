@@ -1,24 +1,40 @@
-﻿let
+let
     // =========================================================
-    // 1. CONEXIÓN Y BÚSQUEDA POR CENTRO DE COSTOS
+    // 1. CONEXIÓN Y BÚSQUEDA SOBRE EL ÍNDICE DEL PROYECTO
     // =========================================================
-    ParamCentroCostos = Text.Upper(Text.Trim(ProyectoActual)),
-    RutaBase = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
-    ArchivosSharePoint = SharePoint.Files(RutaBase, [ApiVersion = 15]),
-    
-    ArchivosProyecto = Table.SelectRows(ArchivosSharePoint, each 
-        Text.Contains(Text.Upper([Folder Path]), "/" & ParamCentroCostos & "/ACTUAL/") and 
-        not Text.StartsWith([Name], "~$")
-    ),
-    
+    ParamProyecto = Text.Trim(ProyectoActual),
+    SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
+    Headers = [Accept="application/json;odata=nometadata"],
+    FnEncode = F_Globales[FnEncode],
+    ArchivosProyecto = Table.Buffer(SP_Archivos_Proyecto),
+
+    FxGetBinary = (textoArchivo as text) as binary =>
+        let
+            Filas = Table.SelectRows(ArchivosProyecto, each Text.Contains([Name], textoArchivo, Comparer.OrdinalIgnoreCase)),
+            Ordenadas = Table.Sort(Filas, {{"Centro de Costos", Order.Ascending}, {"TimeLastModified", Order.Descending}}),
+            Binario =
+                if Table.RowCount(Ordenadas) = 0 then
+                    error Error.Record(
+                        "PLANTILLA_PPTO_SINCO",
+                        "No se encontró el archivo requerido: " & textoArchivo & " para ProyectoActual=" & ParamProyecto,
+                        [ProyectoActual = ParamProyecto, ArchivoBuscado = textoArchivo]
+                    )
+                else
+                    Binary.Buffer(Web.Contents(SiteUrl, [
+                        RelativePath = "/_api/web/GetFileByServerRelativeUrl('" & FnEncode(Ordenadas{0}[ServerRelativeUrl]) & "')/$value",
+                        Headers = Headers,
+                        Timeout = #duration(0, 0, 5, 0)
+                    ]))
+        in
+            Binario,
+
     FxLimpiarCelda = (t as nullable text) as text => 
         if t = null then "" else Text.Trim(Text.Replace(Text.Replace(Text.Replace(Text.From(t), "#(lf)", " "), "#(cr)", " "), "#(00A0)", " ")),
 
     // =========================================================
     // 2. EXTRACCIÓN DEL DICCIONARIO: "SEGUIMIENTO POR ITEMS"
     // =========================================================
-    FilaSeg = Table.SelectRows(ArchivosProyecto, each Text.Contains(Text.Upper([Name]), "SEGUIMIENTO POR ITEMS")),
-    BinarioSeg = FilaSeg{0}[Content],
+    BinarioSeg = FxGetBinary("SEGUIMIENTO POR ITEMS"),
     TextoHTML_Seg = Text.FromBinary(BinarioSeg, 65001),
     
     ColsSeg_HTML = List.Transform({1..3}, each {"Columna" & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}),
@@ -33,8 +49,7 @@
     // =========================================================
     // 3. EXTRACCIÓN DE LA BASE PRINCIPAL: "ANALISIS DE PRECIOS"
     // =========================================================
-    FilaAPU = Table.SelectRows(ArchivosProyecto, each Text.Contains(Text.Upper([Name]), "ANALISIS DE PRECIOS UNITARIOS")),
-    BinarioAPU = FilaAPU{0}[Content],
+    BinarioAPU = FxGetBinary("ANALISIS DE PRECIOS UNITARIOS"),
     TextoHTML_APU = Text.FromBinary(BinarioAPU, 65001), 
     
     Columnas_HTML = List.Transform({1..10}, each {"Columna" & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}),
@@ -218,3 +233,4 @@
     SinHuerfanos = Table.SelectRows(TablaLimpia, each [Padre] <> null or [Código] = "CD")
 in
     SinHuerfanos
+
