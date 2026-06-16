@@ -245,7 +245,7 @@ let
                                  then Text.From(tryN[Value] / 1000)
                                  else codTxt,
                         capTxt = if descTxt = "" then codCap else codCap & "-" & descTxt
-                    in if tipo = "Capitulo" then FnRemoveAccentsSymbols(capTxt) else null, type text),
+                    in if tipo = "Capitulo" then capTxt else null, type text),
 
                 ItemsCapituloFillDown   = Table.FillDown(ItemsWithCapitulo, {"Capitulo"}),
 
@@ -261,7 +261,7 @@ let
                                     else "",
                         subTxt    = if tipo <> "SubCapitulo" or fuenteRaw = "" then null
                                     else let baseTxt = if Text.Contains(fuenteRaw, ":") then Text.AfterDelimiter(fuenteRaw, ":") else fuenteRaw
-                                         in FnRemoveAccentsSymbols(Text.Trim(baseTxt))
+                                         in Text.Trim(baseTxt)
                     in subTxt, type text),
 
                 ItemsSubcapituloFillDown  = Table.FillDown(ItemsWithSubcapitulo, {"Subcapitulo"}),
@@ -294,7 +294,7 @@ let
                         dTxt0   = if descIns = null then "" else Text.Trim(Text.From(descIns)),
                         umTxt   = if umIns   = null then "" else Text.Trim(Text.From(umIns)),
                         baseTxt = if umTxt = "" then dTxt0 else dTxt0 & " (" & umTxt & ")"
-                    in FnRemoveAccentsSymbols(baseTxt), type text),
+                    in baseTxt, type text),
 
                 OrigenAPU_Raw = try Excel.Workbook(BinarioPresupuesto, null, true){0}[Data]
                                 otherwise Html.Table(Text.FromBinary(BinarioPresupuesto, 65001), Columnas_APU, [RowSelector="tr"]),
@@ -338,7 +338,7 @@ let
                         nombreLimpio  = Text.Combine(List.Select(Text.Split(nombreSinSub, " "), each _ <> ""), " "),
                         actTxt        = if umTxt = "" then codTxt & "-" & nombreLimpio
                                         else codTxt & "-" & nombreLimpio & " (" & umTxt & ")"
-                    in FnRemoveAccentsSymbols(actTxt), type text),
+                    in actTxt, type text),
 
                 NumsTyped = Table.TransformColumns(ItemsWithActividad, {
                     {"Cantidad Presupuesto", each FxToNumberFlex(_), type number},
