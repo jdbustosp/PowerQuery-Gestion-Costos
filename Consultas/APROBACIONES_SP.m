@@ -7,6 +7,7 @@ let
     FnReadSPExcel = F_Globales[FnReadSPExcel],
     FnBuildFolderPrefixMap = F_Globales[FnBuildFolderPrefixMap],
     FnTrimText = F_Globales[FnTrimText],
+    FnRemoveAccentsSymbols = F_Globales[FnRemoveAccentsSymbols],
 
     ParamProyecto = Text.Trim(ProyectoActual),
 
@@ -27,8 +28,19 @@ let
     // ============================================================
     // FILTRO Y MAPEO
     // ============================================================
+    ParamProyectoClean = FnRemoveAccentsSymbols(Text.Upper(ParamProyecto)),
     FiltroProyecto = Table.SelectRows(Origen, each
-        try [#"Proyecto:"] <> null and Text.StartsWith(Text.Upper([#"Proyecto:"]), Text.Upper(ParamProyecto)) otherwise false
+        try
+            let
+                proyectoRaw = [#"Proyecto:"],
+                proyectoClean = FnRemoveAccentsSymbols(Text.Upper(Text.Trim(Text.From(proyectoRaw))))
+            in
+                if ParamProyectoClean = "PAYANDE" then
+                    Text.StartsWith(proyectoClean, "PAYANDE") and
+                    (Text.Contains(proyectoClean, "URB INTERNO") or Text.Contains(proyectoClean, "TORRES"))
+                else
+                    Text.StartsWith(proyectoClean, ParamProyectoClean) or Text.Contains(proyectoClean, ParamProyectoClean)
+        otherwise false
     ),
 
     ColumnasRenombradas = Table.RenameColumns(FiltroProyecto, {
