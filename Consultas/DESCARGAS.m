@@ -4,24 +4,20 @@ let
     // ============================================================
     FxToNumberFlex = F_Globales[FxToNumberFlex],
     FnCleanText = F_Globales[FnCleanText],
-    FnEncode = F_Globales[FnEncode],
 
     // ============================================================
-    // CONEXIÓN A SHAREPOINT: Archivo "Descarga ppto"
-    // Ruta: /Departamento Tecnico/COORDINACION DE PRESUPUESTOS/0. Descargas pptos - Control costos interno/
+    // FUENTE LOCAL: tabla DESCARGA del libro actual
     // ============================================================
-    SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
-    FilePath = "/sites/MiGerenciaViv/Departamento Tecnico/COORDINACION DE PRESUPUESTOS/0. Descargas pptos - Control costos interno/Descarga ppto.xlsx",
-
-    // Descargar el archivo Excel desde SharePoint
-    // Web.Contents con RelativePath: DataSourcePath estable (SiteUrl), evita problemas de cache
-    BinarioArchivo = Binary.Buffer(Web.Contents(SiteUrl, [
-        RelativePath = "/_api/web/GetFileByServerRelativeUrl('" & FnEncode(FilePath) & "')/$value"
-    ])),
-
-    // Abrir el libro y buscar la tabla DESCARGAS
-    Libro = Excel.Workbook(BinarioArchivo, null, true),
-    TablaDescargas = Libro{[Item="DESCARGA", Kind="Table"]}[Data],
+    TablaDescargaLocal = try Excel.CurrentWorkbook(){[Name="DESCARGA"]}[Content] otherwise null,
+    TablaDescargas =
+        if TablaDescargaLocal = null then
+            error Error.Record(
+                "DESCARGAS",
+                "No se encontró la tabla local DESCARGA en este libro.",
+                [TablaRequerida = "DESCARGA"]
+            )
+        else
+            TablaDescargaLocal,
 
     // ============================================================
     // FILTRAR POR PROYECTO ACTUAL
