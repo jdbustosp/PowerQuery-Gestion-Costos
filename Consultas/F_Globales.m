@@ -54,6 +54,22 @@ let
                          else List.Accumulate(replacements, initial, (state, current) => Text.Replace(state, current{0}, current{1}))
             in result,
 
+        FnRemoveAccentMarks = (t as any) as nullable text =>
+            let
+                initial = try (if t = null then null else Text.From(t)) otherwise null,
+                replacements = {
+                    {"#(00E1)","a"},{"#(00C1)","A"},
+                    {"#(00E9)","e"},{"#(00C9)","E"},
+                    {"#(00ED)","i"},{"#(00CD)","I"},
+                    {"#(00F3)","o"},{"#(00D3)","O"},
+                    {"#(00FA)","u"},{"#(00DA)","U"},
+                    {"#(00DC)","U"},{"#(00FC)","u"},
+                    {"#(00BA)",""},{"#(00B0)",""},{"#(00A8)",""},
+                    {"#(lf)", " "}, {"#(cr)", " "}
+                },
+                result = if initial = null then null
+                         else List.Accumulate(replacements, initial, (state, current) => Text.Replace(state, current{0}, current{1}))
+            in result,
         FnClaveLimpia = (t as nullable text) as nullable text =>
             let
                 sinUnidad = if t = null then null

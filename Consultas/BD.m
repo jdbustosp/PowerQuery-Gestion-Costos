@@ -2,6 +2,7 @@ let
     Tol = 0.01,
     FnRemoveAccentsSymbols = F_Globales[FnRemoveAccentsSymbols],
     FnCleanContratista = F_Globales[FnCleanContratista],
+    FnRemoveAccentMarks = F_Globales[FnRemoveAccentMarks],
     ToNumber0 = (v as any) as number =>
         let n = try Number.From(v) otherwise null
         in if n = null then 0 else n,
@@ -63,7 +64,8 @@ let
     LlavesLimpias = Table.TransformColumns(ColumnasReordenadas, {
         {"Centro de Costos",     each try (if _ = null then "" else Text.Upper(Text.Trim(Text.From(_)))) otherwise "", type text},
         {"Codigo act",           each try (if _ = null then "" else Text.Upper(Text.Trim(Text.From(_)))) otherwise "", type text},
-        {"Ins",                  each try (if _ = null then "" else Text.Upper(Text.Trim(Text.From(_)))) otherwise "", type text},
+        {"Ins",                  each try (if _ = null then "" else Text.Upper(Text.Trim(FnRemoveAccentMarks(_)))) otherwise "", type text},
+        {"Actividad",            each try (if _ = null then null else Text.Upper(Text.Trim(FnRemoveAccentMarks(_)))) otherwise null, type text},
         {"Tipo",                 each try (if _ = null then "" else Text.Upper(Text.Trim(Text.From(_)))) otherwise "", type text},
         {"# OC / Contrato",      each try (if _ = null then null else Text.Trim(Text.From(_))) otherwise null, type text},
         {"Nombre Contratista",   each try FnCleanContratista(_) otherwise null, type text},
