@@ -1,7 +1,7 @@
 let
     SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
     ParamProyecto = Text.Trim(ProyectoActual),
-    FechaVersion = Text.Trim(FechaVersionSINCO),
+    FechaVersion = try Text.Trim(Text.From(FechaVersionSINCO)) otherwise "",
     FnEncode = F_Globales[FnEncode],
     FnReadSPBinary = F_Globales[FnReadSPBinary],
     FxToNumberFlex = F_Globales[FxToNumberFlex],
@@ -14,7 +14,7 @@ let
     Centros = try List.Distinct(SP_CarpetasCC[Centro de Costos]) otherwise List.Distinct(Table.Column(COMPRAS, "Centro de Costos")),
     FnFilesPrev = (cc as text) as table =>
         let
-            path = BasePath & "/" & cc & "/Versiones previas/" & FechaVersion,
+            path = if FechaVersion = "" then BasePath & "/" & cc & "/Actual" else BasePath & "/" & cc & "/Versiones previas/" & FechaVersion,
             raw = try Json.Document(Web.Contents(SiteUrl, [
                 RelativePath = "/_api/web/GetFolderByServerRelativeUrl('" & FnEncode(path) & "')/Files",
                 Query = [#"$select" = "Name,ServerRelativeUrl,TimeLastModified,Length"],
