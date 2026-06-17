@@ -89,7 +89,7 @@ let
         WithMeta = Table.AddColumn(Raw, "__meta", (r as record) =>
             let
                 i = r[__i],
-                metas = Table.SelectRows(Raw, each [__i] < i and FnText([Columna1]) <> "" and FnText([Columna2]) <> "" and FnText([Columna4]) <> "" and (try Date.From([Columna1]) otherwise null) <> null),
+                metas = Table.SelectRows(Raw, each [__i] < i and FnText([Columna1]) <> "" and FnText([Columna2]) <> "" and FnText([Columna4]) <> "" and (try Date.From([Columna1]) otherwise null) <> null and (try Number.FromText(FnText([Columna2])) otherwise null) <> null and (try Number.FromText(FnText([Columna4])) otherwise null) <> null),
                 sorted = Table.Sort(metas, {{"__i", Order.Descending}})
             in
                 if Table.RowCount(sorted) = 0 then null else sorted{0}, type nullable record),
@@ -143,7 +143,7 @@ let
         WithMeta = Table.AddColumn(Raw, "__meta", (r as record) =>
             let
                 i = r[__i],
-                metas = Table.SelectRows(Raw, each [__i] < i and FnText([Columna1]) <> "" and FnText([Columna2]) <> "" and FnText([Columna4]) <> "" and (try Date.From([Columna1]) otherwise null) <> null),
+                metas = Table.SelectRows(Raw, each [__i] < i and FnText([Columna1]) <> "" and FnText([Columna2]) <> "" and FnText([Columna4]) <> "" and FnText([Columna3]) = "" and (try Date.From([Columna1]) otherwise null) <> null and (try Number.FromText(FnText([Columna2])) otherwise null) <> null),
                 sorted = Table.Sort(metas, {{"__i", Order.Descending}})
             in
                 if Table.RowCount(sorted) = 0 then null else sorted{0}, type nullable record),
@@ -195,7 +195,7 @@ let
         Text.Contains([Name], "ESTADO DE ORDENES", Comparer.OrdinalIgnoreCase) or
         Text.Contains([Name], "INFORME ENTRADAS DE ALMACEN", Comparer.OrdinalIgnoreCase) or
         Text.Contains([Name], "INFORME ENTRADAS DE ALMACÉN", Comparer.OrdinalIgnoreCase) or
-        Text.Contains([Name], "MASIVO SALIDAS DETALLADO", Comparer.OrdinalIgnoreCase)
+        Text.Contains([Name], "MASIVO SALIDAS", Comparer.OrdinalIgnoreCase)
     ),
     ConCentroCosto = ArchivosProyecto,
 
@@ -224,7 +224,7 @@ let
             binDet = PickLatestBinary(_, "INFORMEORDEN"),
             binOC = PickLatestBinary(_, "ESTADO DE ORDENES"),
             binEntradas = PickLatestBinaryAny(_, {"INFORME ENTRADAS DE ALMACEN", "INFORME ENTRADAS DE ALMACÉN"}),
-            binSalidas = PickLatestBinary(_, "MASIVO SALIDAS DETALLADO")
+            binSalidas = PickLatestBinary(_, "MASIVO SALIDAS")
         in
             if binDet <> null or binEntradas <> null or binSalidas <> null then [Bin_Det = binDet, Bin_OC = binOC, Bin_Entradas = binEntradas, Bin_Salidas = binSalidas] else null
     }}),
@@ -290,13 +290,13 @@ let
     AddedCoalesced = Table.AddColumn(ExpandedGenerico, "FinalCols", each
         let
             e = [Ex.Ins] <> null,
-            ca = if e then [Codigo act] else (if [Rs.Codigo act] <> null then [Rs.Codigo act] else [Codigo act]),
+            ca = if [#"#ENTRADA"] <> null then null else if e then [Codigo act] else (if [Rs.Codigo act] <> null then [Rs.Codigo act] else [Codigo act]),
             a0 = FnText([Actividad]),
             aOrig = if a0 = "" then null else if ca <> null and not Text.StartsWith(a0, Text.From(ca)) then Text.From(ca) & " - " & a0 else a0,
 
-            ActOficial = if [Act_Estricto] <> null then [Act_Estricto] else if [Act_Gen] <> null then [Act_Gen] else aOrig,
-            CapFinal = if [Cap_Estricto] <> null then [Cap_Estricto] else [Cap_Gen],
-            SubCapFinal = if [Sub_Estricto] <> null then [Sub_Estricto] else [Sub_Gen]
+            ActOficial = if [#"#ENTRADA"] <> null then null else if [Act_Estricto] <> null then [Act_Estricto] else if [Act_Gen] <> null then [Act_Gen] else aOrig,
+            CapFinal = if [#"#ENTRADA"] <> null then null else if [Cap_Estricto] <> null then [Cap_Estricto] else [Cap_Gen],
+            SubCapFinal = if [#"#ENTRADA"] <> null then null else if [Sub_Estricto] <> null then [Sub_Estricto] else [Sub_Gen]
         in [
             InsFinal = if e then [Ex.Ins] else (if [Rs.Ins] <> null then [Rs.Ins] else [Ins]),
             CodActFinal = ca,
@@ -308,6 +308,8 @@ let
     ExpandedFinalCols = Table.ExpandRecordColumn(Table.RemoveColumns(AddedCoalesced, {"Ins", "Actividad", "Codigo act", "Ex.Ins", "Rs.Codigo act", "Rs.Actividad", "Rs.Ins", "Act_Estricto", "Cap_Estricto", "Sub_Estricto", "Act_Gen", "Cap_Gen", "Sub_Gen"}), "FinalCols", {"InsFinal", "CodActFinal", "ActFinal", "CapFinal", "SubCapFinal"}, {"Ins", "Codigo act", "Actividad", "Capitulo", "Subcapitulo"}),
 
     NumericColumns = Table.TransformColumns(ExpandedFinalCols, {
+        {"#ENTRADA", each FxToNumberFlex(_), Int64.Type},
+        {"#SALIDA", each FxToNumberFlex(_), Int64.Type},
         {"Cantidad Comprado", each FxToNumberFlex(_), type number},
         {"VT Comprado", each FxToNumberFlex(_), type number},
         {"VU_Crudo", each FxToNumberFlex(_), type number},
@@ -331,7 +333,7 @@ let
     }, MissingField.Ignore),
     TypedFinal = Table.TransformColumnTypes(SelectedFinal, {
         {"Centro de Costos", type text}, {"Codigo ins", Int64.Type}, {"Cantidad Comprado", type number},
-        {"VT Comprado", type number}, {"V/U Comprado", type number}, {"Cantidad Cortes", type number},
+        {"#ENTRADA", Int64.Type}, {"#SALIDA", Int64.Type}, {"VT Comprado", type number}, {"V/U Comprado", type number}, {"Cantidad Cortes", type number},
         {"VT Cortes", type number}, {"Cantidad Cons Cols", type number}, {"VT Cons Cols", type number}
     }),
     TablaFinal = TypedFinal
