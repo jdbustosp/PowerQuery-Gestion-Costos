@@ -46,6 +46,9 @@ let
             Text.Contains([FileName], "ANALISIS DE PRECIOS UNITARIOS", Comparer.OrdinalIgnoreCase) or
             Text.Contains([FileName], "INFORMEORDEN",                  Comparer.OrdinalIgnoreCase) or
             Text.Contains([FileName], "ESTADO DE ORDENES",             Comparer.OrdinalIgnoreCase) or
+            Text.Contains([FileName], "INFORME ENTRADAS DE ALMACEN",   Comparer.OrdinalIgnoreCase) or
+            Text.Contains([FileName], "INFORME ENTRADAS DE ALMACÉN",   Comparer.OrdinalIgnoreCase) or
+            Text.Contains([FileName], "MASIVO SALIDAS DETALLADO",      Comparer.OrdinalIgnoreCase) or
             Text.Contains([FileName], "ESTADO DE CONTRATOS",           Comparer.OrdinalIgnoreCase) or
             Text.Contains([FileName], "DESCUENTOS",                    Comparer.OrdinalIgnoreCase)
         )

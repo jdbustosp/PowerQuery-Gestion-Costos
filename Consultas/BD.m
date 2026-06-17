@@ -12,13 +12,13 @@ let
     // ============================================================
     ColumnasOrden = {
         "Centro de Costos", "Codigo act", "Codigo ins", "Ins", "Actividad", "Capitulo", "Subcapitulo", "Tipo",
-        "# OC / Contrato", "Nombre Contratista", "Descripcion contrato", "# CC - Comparativo", "Clasificador",
+        "# OC / Contrato", "#ENTRADA", "#SALIDA", "Nombre Contratista", "Descripcion contrato", "# CC - Comparativo", "Clasificador",
         "Cantidad Proyectado", "VT Proyectado", "Cantidad Consumido", "VT Consumido",
         "Cantidad Comprado", "V/U Comprado", "VT Comprado",
         "Cantidad Contratado", "V/U Contratado", "VT Contratado",
         "Cantidad Presupuesto", "V/U Presupuesto", "VT Presupuesto",
         "Cant. aprobacion", "V/U aprobacion", "VR total aprobacion",
-        "Valor Total ppto (CC)", "Cantidad Cortes", "VT Cortes", "Valor descuento",
+        "Valor Total ppto (CC)", "Cantidad Cortes", "VT Cortes", "Cantidad Cons Cols", "VT Cons Cols", "Valor descuento",
         "Cantidad_Calc", "V/U ppto (CC)", "Cantidad CC Cons", "V/U CC cons", "VT CC cons",
         "VR_Bruto_con_desc", "Estado", "Fecha_de_pago", "# Prov._(descue", "No_Prov",
         "Centros_de_costos", "Clasificador_Actividad", "Capitulo_Costo directo", "Capitulo_Centro_Costos",
@@ -30,7 +30,7 @@ let
         "Cantidad Contratado", "V/U Contratado", "VT Contratado",
         "Cantidad Presupuesto", "V/U Presupuesto", "VT Presupuesto",
         "Cant. aprobacion", "V/U aprobacion", "VR total aprobacion",
-        "Valor Total ppto (CC)", "Cantidad Cortes", "VT Cortes", "Valor descuento",
+        "Valor Total ppto (CC)", "Cantidad Cortes", "VT Cortes", "Cantidad Cons Cols", "VT Cons Cols", "Valor descuento",
         "Cantidad_Calc", "V/U ppto (CC)", "Cantidad CC Cons", "V/U CC cons", "VT CC cons",
         "VR_Bruto_con_desc"
     },
