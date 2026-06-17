@@ -137,23 +137,22 @@ let
     // PROCESAR MASIVO SALIDAS DETALLADO
     // ============================================================
     FxProcesarSalidas = (BinSalidas as binary) as table => let
-        Raw_Raw = try Excel.Workbook(Binary.Buffer(BinSalidas), null, true){0}[Data]
-                otherwise Html.Table(Text.FromBinary(Binary.Buffer(BinSalidas), 65001), Columnas_Salidas, [RowSelector="tr"]),
+        Raw_Raw = Html.Table(Text.FromBinary(Binary.Buffer(BinSalidas), 28591), Columnas_Salidas, [RowSelector="tr"]),
         Raw = Table.AddIndexColumn(FnRenameSequential(Raw_Raw), "__i", 0, 1, Int64.Type),
         WithMeta = Table.AddColumn(Raw, "__meta", (r as record) =>
             let
                 i = r[__i],
-                metas = Table.SelectRows(Raw, each [__i] < i and FnText([Columna1]) <> "" and FnText([Columna2]) <> "" and FnText([Columna4]) <> "" and FnText([Columna3]) = "" and (try Date.From([Columna1]) otherwise null) <> null and (try Number.FromText(FnText([Columna2])) otherwise null) <> null),
+                metas = Table.SelectRows(Raw, each [__i] < i and FnText([Columna1]) <> "" and FnText([Columna2]) <> "" and FnText([Columna3]) <> "" and (try Date.From([Columna1]) otherwise null) <> null and (try Number.FromText(FnText([Columna2])) otherwise null) <> null),
                 sorted = Table.Sort(metas, {{"__i", Order.Descending}})
             in
                 if Table.RowCount(sorted) = 0 then null else sorted{0}, type nullable record),
         Items = Table.SelectRows(WithMeta, each
             let
-                cod = FnText([Columna2]),
+                cod = FnText([Columna1]),
                 codNum = try Number.FromText(cod) otherwise null,
-                ins = FnText([Columna3]),
-                cant = FxToNumberFlex([Columna6]),
-                vt = FxToNumberFlex([Columna9])
+                ins = FnText([Columna2]),
+                cant = FxToNumberFlex([Columna5]),
+                vt = FxToNumberFlex([Columna8])
             in
                 codNum <> null and ins <> "" and (cant <> null or vt <> null)
         ),
@@ -161,11 +160,11 @@ let
             let
                 m = [__meta],
                 salida = if m = null then null else FnText(Record.Field(m, "Columna2")),
-                contratista = if m = null then null else Record.Field(m, "Columna4"),
-                insFinal = FnBuildInsUM([Columna3], [Columna5]),
-                codAct = FnFormatCodigoAct([Columna4])
+                contratista = if m = null then null else Record.Field(m, "Columna3"),
+                insFinal = FnBuildInsUM([Columna2], [Columna4]),
+                codAct = FnFormatCodigoAct([Columna3])
             in [
-                #"Codigo ins" = FnText([Columna2]),
+                #"Codigo ins" = FnText([Columna1]),
                 Ins = insFinal,
                 Actividad = null,
                 #"Codigo act" = codAct,
@@ -180,8 +179,8 @@ let
                 #"Cantidad Cortes" = null,
                 #"VT Cortes" = null,
                 #"#SALIDA" = salida,
-                #"Cantidad Cons Cols" = FxToNumberFlex([Columna6]),
-                #"VT Cons Cols" = FxToNumberFlex([Columna9])
+                #"Cantidad Cons Cols" = FxToNumberFlex([Columna5]),
+                #"VT Cons Cols" = FxToNumberFlex([Columna8])
             ]),
         Expanded = Table.ExpandRecordColumn(AddStd, "Std", ColumnasBase, ColumnasBase),
         Selected = Table.SelectColumns(Expanded, ColumnasBase, MissingField.UseNull)
