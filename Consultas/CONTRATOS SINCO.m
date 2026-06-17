@@ -14,7 +14,7 @@ let
     Centros = try List.Distinct(SP_CarpetasCC[Centro de Costos]) otherwise List.Distinct(Table.Column(COMPRAS, "Centro de Costos")),
     FnFilesPrev = (cc as text) as table =>
         let
-            path = if FechaVersion = "" then BasePath & "/" & cc & "/Actual" else BasePath & "/" & cc & "/Versiones previas/" & FechaVersion,
+            path = BasePath & "/" & cc & "/Versiones previas/" & FechaVersion,
             raw = try Json.Document(Web.Contents(SiteUrl, [
                 RelativePath = "/_api/web/GetFolderByServerRelativeUrl('" & FnEncode(path) & "')/Files",
                 Query = [#"$select" = "Name,ServerRelativeUrl,TimeLastModified,Length"],
@@ -26,7 +26,7 @@ let
         in
             add,
 
-    ArchivosPrevios = Table.Buffer(if List.Count(Centros)=0 then #table({"Name","ServerRelativeUrl","Centro de Costos"}, {}) else Table.Combine(List.Transform(Centros, each FnFilesPrev(_)))),
+    ArchivosPrevios = Table.Buffer(if FechaVersion = "" or List.Count(Centros)=0 then #table({"Name","ServerRelativeUrl","Centro de Costos"}, {}) else Table.Combine(List.Transform(Centros, each FnFilesPrev(_)))),
     FnPick = (cc as text, containsText as text) as nullable binary =>
         let
             rows = Table.Sort(Table.SelectRows(ArchivosPrevios, each [Centro de Costos] = cc and Text.Contains([Name], containsText, Comparer.OrdinalIgnoreCase)), {{"TimeLastModified", Order.Descending}, {"Name", Order.Ascending}}),
