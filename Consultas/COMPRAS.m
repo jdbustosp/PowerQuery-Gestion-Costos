@@ -85,14 +85,16 @@ let
     FxProcesarEntradas = (BinEntradas as binary) as table => let
         Raw_Raw = try Excel.Workbook(Binary.Buffer(BinEntradas), null, true){0}[Data]
                 otherwise Html.Table(Text.FromBinary(Binary.Buffer(BinEntradas), 65001), Columnas_Entradas, [RowSelector="tr"]),
-        Raw = Table.AddIndexColumn(FnRenameSequential(Raw_Raw), "__i", 0, 1, Int64.Type),
-        WithMeta = Table.AddColumn(Raw, "__meta", (r as record) =>
-            let
-                i = r[__i],
-                metas = Table.SelectRows(Raw, each [__i] < i and FnText([Columna1]) <> "" and FnText([Columna2]) <> "" and FnText([Columna4]) <> "" and (try Date.From([Columna1]) otherwise null) <> null and (try Number.FromText(FnText([Columna2])) otherwise null) <> null and (try Number.FromText(FnText([Columna4])) otherwise null) <> null),
-                sorted = Table.Sort(metas, {{"__i", Order.Descending}})
-            in
-                if Table.RowCount(sorted) = 0 then null else sorted{0}, type nullable record),
+        // FillDown O(N): se marca cada fila de encabezado una sola vez y se arrastra
+        // hacia abajo, en lugar de re-escanear toda la tabla por cada fila (O(N^2)).
+        Raw = Table.Buffer(FnRenameSequential(Raw_Raw)),
+        ConFlagMeta = Table.AddColumn(Raw, "__esMeta", each
+            FnText([Columna1]) <> "" and FnText([Columna2]) <> "" and FnText([Columna4]) <> "" and
+            (try Date.From([Columna1]) otherwise null) <> null and
+            (try Number.FromText(FnText([Columna2])) otherwise null) <> null and
+            (try Number.FromText(FnText([Columna4])) otherwise null) <> null, type logical),
+        ConMetaRec = Table.AddColumn(ConFlagMeta, "__meta", each if [__esMeta] then _ else null, type nullable record),
+        WithMeta = Table.FillDown(ConMetaRec, {"__meta"}),
         Items = Table.SelectRows(WithMeta, each
             let
                 cod = FnText([Columna1]),
@@ -138,14 +140,14 @@ let
     // ============================================================
     FxProcesarSalidas = (BinSalidas as binary) as table => let
         Raw_Raw = Html.Table(Text.FromBinary(Binary.Buffer(BinSalidas), 28591), Columnas_Salidas, [RowSelector="tr"]),
-        Raw = Table.AddIndexColumn(FnRenameSequential(Raw_Raw), "__i", 0, 1, Int64.Type),
-        WithMeta = Table.AddColumn(Raw, "__meta", (r as record) =>
-            let
-                i = r[__i],
-                metas = Table.SelectRows(Raw, each [__i] < i and FnText([Columna1]) <> "" and FnText([Columna2]) <> "" and FnText([Columna3]) <> "" and (try Date.From([Columna1]) otherwise null) <> null and (try Number.FromText(FnText([Columna2])) otherwise null) <> null),
-                sorted = Table.Sort(metas, {{"__i", Order.Descending}})
-            in
-                if Table.RowCount(sorted) = 0 then null else sorted{0}, type nullable record),
+        // FillDown O(N): mismo patron que en Entradas para evitar el re-escaneo O(N^2).
+        Raw = Table.Buffer(FnRenameSequential(Raw_Raw)),
+        ConFlagMeta = Table.AddColumn(Raw, "__esMeta", each
+            FnText([Columna1]) <> "" and FnText([Columna2]) <> "" and FnText([Columna3]) <> "" and
+            (try Date.From([Columna1]) otherwise null) <> null and
+            (try Number.FromText(FnText([Columna2])) otherwise null) <> null, type logical),
+        ConMetaRec = Table.AddColumn(ConFlagMeta, "__meta", each if [__esMeta] then _ else null, type nullable record),
+        WithMeta = Table.FillDown(ConMetaRec, {"__meta"}),
         Items = Table.SelectRows(WithMeta, each
             let
                 cod = FnText([Columna1]),
