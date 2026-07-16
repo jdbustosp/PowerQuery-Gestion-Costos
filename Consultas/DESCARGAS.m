@@ -4,6 +4,10 @@ let
     // ".../0. Descargas pptos - Control costos interno/<Proyecto>.xlsx".
     // El archivo se localiza por nombre (exacto primero, luego "contiene"),
     // asi que agregar un proyecto nuevo = subir su archivo, sin tocar codigo.
+    //
+    // La carpeta se prueba en 2 ubicaciones posibles (CarpetasCandidatas):
+    // la actual y la original, por si vuelve a moverse en SharePoint. Si se
+    // reubica a un tercer sitio, hay que agregar esa ruta a la lista.
     // ============================================================
     FxToNumberFlex = F_Globales[FxToNumberFlex],
     FnCleanText = F_Globales[FnCleanText],
@@ -11,7 +15,11 @@ let
     FnEncode = F_Globales[FnEncode],
 
     SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
-    CarpetaDescargas = "/sites/MiGerenciaViv/Departamento Tecnico/COORDINACION DE PRESUPUESTOS/0. Descargas pptos - Control costos interno",
+    RutaBase = "/sites/MiGerenciaViv/Departamento Tecnico/COORDINACION DE PRESUPUESTOS",
+    CarpetasCandidatas = {
+        RutaBase & "/DashBoard/0. Descargas pptos - Control costos interno",
+        RutaBase & "/0. Descargas pptos - Control costos interno"
+    },
     ParamProyecto = Text.Trim(ProyectoActual),
     ProyUp = Text.Upper(ParamProyecto),
 
@@ -22,13 +30,20 @@ let
     },
     TablaVacia = #table(ColumnasFinales, {}),
 
-    // ---------- Localizar el archivo del proyecto ----------
-    Listado = try Json.Document(Web.Contents(SiteUrl, [
-        RelativePath = "/_api/web/GetFolderByServerRelativeUrl('" & FnEncode(CarpetaDescargas) & "')/Files",
-        Query = [#"$select" = "Name,ServerRelativeUrl"],
-        Headers = [Accept = "application/json;odata=nometadata"],
-        Timeout = #duration(0, 0, 2, 0)
-    ])) otherwise null,
+    // ---------- Localizar la carpeta (probando cada candidata) ----------
+    FnListarCarpeta = (ruta as text) as nullable record =>
+        try Json.Document(Web.Contents(SiteUrl, [
+            RelativePath = "/_api/web/GetFolderByServerRelativeUrl('" & FnEncode(ruta) & "')/Files",
+            Query = [#"$select" = "Name,ServerRelativeUrl"],
+            Headers = [Accept = "application/json;odata=nometadata"],
+            Timeout = #duration(0, 0, 2, 0)
+        ])) otherwise null,
+
+    Intentos = List.Transform(CarpetasCandidatas, each [Resp = FnListarCarpeta(_)]),
+    IntentoValido = List.First(List.Select(Intentos, each [Resp] <> null and Record.HasFields([Resp], "value")), null),
+    Listado = if IntentoValido = null then null else IntentoValido[Resp],
+
+    // ---------- Localizar el archivo del proyecto dentro de esa carpeta ----------
     Archivos =
         if Listado = null or not Record.HasFields(Listado, "value")
         then #table({"Name", "ServerRelativeUrl"}, {})
