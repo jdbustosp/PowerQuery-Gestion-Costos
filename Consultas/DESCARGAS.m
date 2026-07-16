@@ -17,8 +17,8 @@ let
     SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
     RutaBase = "/sites/MiGerenciaViv/Departamento Tecnico/COORDINACION DE PRESUPUESTOS",
     CarpetasCandidatas = {
-        RutaBase & "/DashBoard/0. Descargas pptos - Control costos interno",
-        RutaBase & "/0. Descargas pptos - Control costos interno"
+        RutaBase & "/0. Descargas pptos - Control costos interno",
+        RutaBase & "/DashBoard/0. Descargas pptos - Control costos interno"
     },
     ParamProyecto = Text.Trim(ProyectoActual),
     ProyUp = Text.Upper(ParamProyecto),
