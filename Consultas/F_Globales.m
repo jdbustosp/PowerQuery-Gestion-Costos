@@ -291,7 +291,14 @@ let
                 ItemsSubcapituloFillDown  = Table.FillDown(ItemsWithSubcapitulo, {"Subcapitulo"}),
                 ItemsWithCodActRaw        = Table.AddColumn(ItemsSubcapituloFillDown, "CodigoActRaw", (r as record) =>
                     let tipo = Record.Field(r, "TipoFila") in if tipo = "Actividad" then Text.From(Record.Field(r, ItemsCodColName)) else null, type text),
-                ItemsCodActRawFillDown    = Table.FillDown(ItemsWithCodActRaw, {"CodigoActRaw"}),
+                // Descripcion real de la fila-Actividad en SEGUIMIENTO POR ITEMS, capturada y
+                // arrastrada junto con el codigo. El codigo de APU es una numeracion
+                // independiente que puede coincidir con el de SEGUIMIENTO por pura casualidad
+                // sin ser la misma actividad; esta descripcion (que SI viene del mismo
+                // reporte que trae los insumos) es la fuente confiable del nombre.
+                ItemsWithDescActRaw       = Table.AddColumn(ItemsWithCodActRaw, "DescActRaw", (r as record) =>
+                    let tipo = Record.Field(r, "TipoFila") in if tipo = "Actividad" then Record.Field(r, ItemsDescColName) else null, type text),
+                ItemsCodActRawFillDown    = Table.FillDown(ItemsWithDescActRaw, {"CodigoActRaw", "DescActRaw"}),
                 ItemsWithCodigoAct        = Table.AddColumn(ItemsCodActRawFillDown, "Codigo act", each FnFormatCodigoAct([CodigoActRaw]), type text),
                 ItemsSoloInsumos          = Table.SelectRows(ItemsWithCodigoAct, each [TipoFila] = "Insumo"),
                 ItemsColsInsumos          = Table.ColumnNames(ItemsSoloInsumos),
@@ -358,8 +365,14 @@ let
                 ItemsWithActividad = Table.AddColumn(ItemsExpandedAPU, "Actividad", each
                     let
                         codTxt        = if [Codigo act]  = null then "" else [Codigo act],
+                        // Prioridad: primero la descripcion real de SEGUIMIENTO (misma fuente
+                        // que el insumo, siempre correcta para ese codigo); si viene vacia,
+                        // el nombre de APU; si tampoco hay, un texto generico.
+                        descSegTxt    = Text.Trim(Text.From(if [DescActRaw] = null then "" else [DescActRaw])),
                         nombreExtraido= Text.Trim(Text.From(if [NombreActAPU] = null then "" else [NombreActAPU])),
-                        nombreReal    = if nombreExtraido = "" then "Actividad " & codTxt else nombreExtraido,
+                        nombreReal    = if descSegTxt <> "" then descSegTxt
+                                        else if nombreExtraido <> "" then nombreExtraido
+                                        else "Actividad " & codTxt,
                         subcapTxt     = Text.Trim(Text.From(if [Subcapitulo] = null then "" else [Subcapitulo])),
                         nombreSinSub  = if subcapTxt <> "" then Text.Replace(nombreReal, subcapTxt, "") else nombreReal,
                         umTxt         = Text.Trim(Text.From(if [UM_Actividad] = null then "" else [UM_Actividad])),
