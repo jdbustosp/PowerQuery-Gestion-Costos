@@ -2,7 +2,10 @@ let
     Funciones = [
         FnFormatCodigoAct = (raw as any) as nullable text =>
             let
-                txtRaw  = if raw = null then null else Text.Trim(Text.From(raw)),
+                // El #(00A0) (espacio no separable) llega invisible desde los reportes de
+                // SharePoint; si no se limpia aqui, "2.041" y "2.041 " (con NBSP) quedan
+                // como codigos distintos y rompen el fill-down/join por codigo de actividad.
+                txtRaw  = if raw = null then null else Text.Trim(Text.Replace(Text.From(raw), "#(00A0)", " ")),
                 result =
                     if txtRaw = null or txtRaw = "" then null
                     else
@@ -229,13 +232,18 @@ let
                         descValue = Record.Field(r, ItemsDescColName),
                         tipoValue = Record.Field(r, ItemsTipoColName),
                         umValue   = Record.Field(r, ItemsUMColName),
-                        codText   = if codValue  = null then "" else Text.Trim(Text.From(codValue)),
+                        codText   = if codValue  = null then "" else Text.Trim(Text.Replace(Text.From(codValue), "#(00A0)", " ")),
                         descText  = if descValue = null then "" else Text.Trim(Text.From(descValue)),
                         tipoText  = if tipoValue = null then "" else Text.Trim(Text.From(tipoValue)),
                         umText    = if umValue   = null then "" else Text.Trim(Text.From(umValue)),
                         codUpper  = Text.Upper(codText),
                         descUpper = Text.Upper(descText),
-                        tryNum    = try Number.FromText(codText),
+                        // Sin este replace, un codigo de Actividad con NBSP pegado hace fallar
+                        // Number.FromText -> la fila cae en "Otro" -> el fill-down de abajo
+                        // arrastra el codigo de la actividad ANTERIOR sobre un bloque de insumos
+                        // que en realidad pertenece a otra actividad (insumos "ajenos").
+                        codTextNum = Text.Replace(codText, " ", ""),
+                        tryNum    = try Number.FromText(codTextNum),
                         isNumeric = not tryNum[HasError],
                         numValue  = if isNumeric then tryNum[Value] else 0,
                         tipoFila  =
@@ -338,7 +346,11 @@ let
                 APU_DiccionarioLimpio = Table.SelectColumns(APU_Diccionario, {"Cod_Temp", "NombreActAPU", "Columna 3"}, MissingField.Ignore),
                 APU_DiccionarioRenombrado = Table.RenameColumns(APU_DiccionarioLimpio,
                     List.Select({{"Cod_Temp", "CodigoActAPU"}, {"Columna 3", "UM_Actividad"}}, each Table.HasColumns(APU_DiccionarioLimpio, _{0}))),
-                DiccionarioAPU_Unico = Table.Buffer(Table.Distinct(APU_DiccionarioRenombrado, {"CodigoActAPU"})),
+                // Ordenar antes de Distinct: si el mismo codigo aparece con 2 nombres reales
+                // en el APU (no por NBSP), Distinct siempre se queda con el mismo (el
+                // alfabeticamente primero) en vez de uno arbitrario que cambia entre refrescos.
+                APU_DiccionarioOrdenado = Table.Sort(APU_DiccionarioRenombrado, {{"NombreActAPU", Order.Ascending}}),
+                DiccionarioAPU_Unico = Table.Buffer(Table.Distinct(APU_DiccionarioOrdenado, {"CodigoActAPU"})),
 
                 ItemsJoinAPU     = Table.NestedJoin(ItemsWithIns, {"Codigo act"}, DiccionarioAPU_Unico, {"CodigoActAPU"}, "APU", JoinKind.LeftOuter),
                 ItemsExpandedAPU = Table.ExpandTableColumn(ItemsJoinAPU, "APU", {"NombreActAPU", "UM_Actividad"}, {"NombreActAPU", "UM_Actividad"}),
