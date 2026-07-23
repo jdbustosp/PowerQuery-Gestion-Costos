@@ -376,15 +376,28 @@ let
 
                 ItemsJoinAPU       = Table.NestedJoin(ItemsWithIns, {"Codigo act"}, DiccionarioAPU_Candidatos, {"CodigoActAPU"}, "APU", JoinKind.LeftOuter),
                 ItemsExpandedAPU0  = Table.ExpandTableColumn(ItemsJoinAPU, "APU", {"CandidatosAPU"}, {"CandidatosAPU"}),
+                // Normaliza para comparar: SEGUIMIENTO trae el separador con guion normal
+                // ("Cinta PVC - PARQUEADERO BLOQUE A") mientras que APU lo trae con NBSP y
+                // sin guion ("Cinta PVC[NBSP]PARQUEADERO BLOQUE A"). Sin normalizar esa
+                // diferencia, ninguno de los 2 textos "contiene" al otro y la coincidencia
+                // nunca se detecta.
+                FnNormalizarParaComparar = (t as any) as text =>
+                    let
+                        base      = Text.Upper(Text.Trim(Text.From(if t = null then "" else t))),
+                        sinNBSP   = Text.Replace(base, "#(00A0)", " "),
+                        sinGuion  = Text.Replace(sinNBSP, " - ", " "),
+                        colapsado = Text.Combine(List.Select(Text.Split(sinGuion, " "), each _ <> ""), " ")
+                    in colapsado,
+
                 ItemsConAPUElegido = Table.AddColumn(ItemsExpandedAPU0, "APUElegido", each
                     let
                         candidatos      = [CandidatosAPU],
                         hayCandidatos   = candidatos <> null and Table.RowCount(candidatos) > 0,
-                        descPropia      = Text.Upper(Text.Trim(Text.From(if [DescActRaw] = null then "" else [DescActRaw]))),
+                        descPropia      = FnNormalizarParaComparar(if [DescActRaw] = null then "" else [DescActRaw]),
                         conCoincidencia = if not hayCandidatos or descPropia = "" then null
                             else Table.SelectRows(candidatos, each
-                                let nombreUpper = Text.Upper(Text.Trim(Text.From([NombreActAPU])))
-                                in Text.Contains(descPropia, nombreUpper) or Text.Contains(nombreUpper, descPropia)),
+                                let nombreNorm = FnNormalizarParaComparar([NombreActAPU])
+                                in Text.Contains(descPropia, nombreNorm) or Text.Contains(nombreNorm, descPropia)),
                         tieneCoincidencia = conCoincidencia <> null and Table.RowCount(conCoincidencia) > 0
                     in
                         if not hayCandidatos then [NombreActAPU = null, UM_Actividad = null]
