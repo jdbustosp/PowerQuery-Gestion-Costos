@@ -362,14 +362,35 @@ let
                 APU_DiccionarioLimpio = Table.SelectColumns(APU_Diccionario, {"Cod_Temp", "NombreActAPU", "Columna 3"}, MissingField.Ignore),
                 APU_DiccionarioRenombrado = Table.RenameColumns(APU_DiccionarioLimpio,
                     List.Select({{"Cod_Temp", "CodigoActAPU"}, {"Columna 3", "UM_Actividad"}}, each Table.HasColumns(APU_DiccionarioLimpio, _{0}))),
-                // Ordenar antes de Distinct: si el mismo codigo aparece con 2 nombres reales
-                // en el APU (no por NBSP), Distinct siempre se queda con el mismo (el
-                // alfabeticamente primero) en vez de uno arbitrario que cambia entre refrescos.
-                APU_DiccionarioOrdenado = Table.Sort(APU_DiccionarioRenombrado, {{"NombreActAPU", Order.Ascending}}),
-                DiccionarioAPU_Unico = Table.Buffer(Table.Distinct(APU_DiccionarioOrdenado, {"CodigoActAPU"})),
+                // Un mismo codigo puede tener MAS DE UNA actividad real distinta en el APU
+                // (ej. "2.041" = "Esmaltado Parqueadero" (m2) en un bloque y "Cinta PVC" (ml)
+                // en otro). No se reduce a un solo candidato por codigo (Table.Distinct no
+                // garantiza cual "gana" de forma confiable ni estable entre refrescos); se
+                // agrupan TODOS los candidatos por codigo y, para cada insumo, se elige el
+                // candidato cuyo nombre realmente coincide con la descripcion propia de
+                // SEGUIMIENTO en esa fila (misma fuente que el insumo, asi que es la senal
+                // mas confiable para saber cual de las actividades es).
+                DiccionarioAPU_Candidatos = Table.Buffer(Table.Group(APU_DiccionarioRenombrado, {"CodigoActAPU"}, {
+                    {"CandidatosAPU", each Table.SelectColumns(_, {"NombreActAPU", "UM_Actividad"}), type table}
+                })),
 
-                ItemsJoinAPU     = Table.NestedJoin(ItemsWithIns, {"Codigo act"}, DiccionarioAPU_Unico, {"CodigoActAPU"}, "APU", JoinKind.LeftOuter),
-                ItemsExpandedAPU = Table.ExpandTableColumn(ItemsJoinAPU, "APU", {"NombreActAPU", "UM_Actividad"}, {"NombreActAPU", "UM_Actividad"}),
+                ItemsJoinAPU       = Table.NestedJoin(ItemsWithIns, {"Codigo act"}, DiccionarioAPU_Candidatos, {"CodigoActAPU"}, "APU", JoinKind.LeftOuter),
+                ItemsExpandedAPU0  = Table.ExpandTableColumn(ItemsJoinAPU, "APU", {"CandidatosAPU"}, {"CandidatosAPU"}),
+                ItemsConAPUElegido = Table.AddColumn(ItemsExpandedAPU0, "APUElegido", each
+                    let
+                        candidatos      = [CandidatosAPU],
+                        hayCandidatos   = candidatos <> null and Table.RowCount(candidatos) > 0,
+                        descPropia      = Text.Upper(Text.Trim(Text.From(if [DescActRaw] = null then "" else [DescActRaw]))),
+                        conCoincidencia = if not hayCandidatos or descPropia = "" then null
+                            else Table.SelectRows(candidatos, each
+                                let nombreUpper = Text.Upper(Text.Trim(Text.From([NombreActAPU])))
+                                in Text.Contains(descPropia, nombreUpper) or Text.Contains(nombreUpper, descPropia)),
+                        tieneCoincidencia = conCoincidencia <> null and Table.RowCount(conCoincidencia) > 0
+                    in
+                        if not hayCandidatos then [NombreActAPU = null, UM_Actividad = null]
+                        else if tieneCoincidencia then conCoincidencia{0}
+                        else candidatos{0}),
+                ItemsExpandedAPU   = Table.ExpandRecordColumn(ItemsConAPUElegido, "APUElegido", {"NombreActAPU", "UM_Actividad"}, {"NombreActAPU", "UM_Actividad"}),
 
                 ItemsWithActividad = Table.AddColumn(ItemsExpandedAPU, "Actividad", each
                     let
