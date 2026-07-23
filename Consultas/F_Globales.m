@@ -368,13 +368,25 @@ let
                         // Prioridad: primero la descripcion real de SEGUIMIENTO (misma fuente
                         // que el insumo, siempre correcta para ese codigo); si viene vacia,
                         // el nombre de APU; si tampoco hay, un texto generico.
-                        descSegTxt    = Text.Trim(Text.From(if [DescActRaw] = null then "" else [DescActRaw])),
+                        // Se limpia el NBSP y se colapsan espacios aqui mismo (no solo en el
+                        // codigo) para que el patron " - Subcapitulo" se detecte de forma
+                        // fiable mas abajo, sin importar espacios/caracteres invisibles sueltos
+                        // pegados en el texto libre del reporte.
+                        descSegRaw    = Text.Trim(Text.Replace(Text.From(if [DescActRaw] = null then "" else [DescActRaw]), "#(00A0)", " ")),
+                        descSegTxt    = Text.Combine(List.Select(Text.Split(descSegRaw, " "), each _ <> ""), " "),
                         nombreExtraido= Text.Trim(Text.From(if [NombreActAPU] = null then "" else [NombreActAPU])),
                         nombreReal    = if descSegTxt <> "" then descSegTxt
                                         else if nombreExtraido <> "" then nombreExtraido
                                         else "Actividad " & codTxt,
                         subcapTxt     = Text.Trim(Text.From(if [Subcapitulo] = null then "" else [Subcapitulo])),
-                        nombreSinSub  = if subcapTxt <> "" then Text.Replace(nombreReal, subcapTxt, "") else nombreReal,
+                        // Si el Subcapitulo viene pegado con un guion separador ("Texto - SUBCAP"),
+                        // se quita el bloque completo (guion incluido) para no dejar un guion
+                        // huerfano colgando antes de la unidad. Si no aparece con ese patron
+                        // exacto, se cae al comportamiento anterior (quitar solo el texto).
+                        conGuion      = if subcapTxt = "" then "" else " - " & subcapTxt,
+                        nombreSinSub  = if subcapTxt = "" then nombreReal
+                                        else if Text.Contains(nombreReal, conGuion) then Text.Replace(nombreReal, conGuion, "")
+                                        else Text.Replace(nombreReal, subcapTxt, ""),
                         umTxt         = Text.Trim(Text.From(if [UM_Actividad] = null then "" else [UM_Actividad])),
                         nombreLimpio  = Text.Combine(List.Select(Text.Split(nombreSinSub, " "), each _ <> ""), " "),
                         actTxt        = if umTxt = "" then codTxt & "-" & nombreLimpio
