@@ -214,7 +214,9 @@ let
         FxProcesarCentroCosto = (BinarioSeguimiento as binary, BinarioPresupuesto as binary) as table =>
             let
                 Columnas_HTML = FnBuildColumnas(25),
-                Columnas_APU  = FnBuildColumnas(3),
+                // Se leen 4 columnas (no 3): la UM de la actividad esta en la columna D
+                // del archivo ANALISIS DE PRECIOS UNITARIOS, no en la C.
+                Columnas_APU  = FnBuildColumnas(4),
 
                 OrigenItems   = try Excel.Workbook(BinarioSeguimiento, null, true){0}[Data]
                                 otherwise Html.Table(Text.FromBinary(BinarioSeguimiento, 65001), Columnas_HTML, [RowSelector="tr"]),
@@ -329,8 +331,8 @@ let
 
                 OrigenAPU_Raw = try Excel.Workbook(BinarioPresupuesto, null, true){0}[Data]
                                 otherwise Html.Table(Text.FromBinary(BinarioPresupuesto, 65001), Columnas_APU, [RowSelector="tr"]),
-                OrigenAPU_Cols = Table.SelectColumns(OrigenAPU_Raw, List.FirstN(Table.ColumnNames(OrigenAPU_Raw), 3)),
-                OrigenAPU = Table.RenameColumns(OrigenAPU_Cols, List.Zip({Table.ColumnNames(OrigenAPU_Cols), {"Columna 1", "Columna 2", "Columna 3"}})),
+                OrigenAPU_Cols = Table.SelectColumns(OrigenAPU_Raw, List.FirstN(Table.ColumnNames(OrigenAPU_Raw), 4)),
+                OrigenAPU = Table.RenameColumns(OrigenAPU_Cols, List.Zip({Table.ColumnNames(OrigenAPU_Cols), {"Columna 1", "Columna 2", "Columna 3", "Columna 4"}})),
 
                 APU_Paso1 = Table.AddColumn(OrigenAPU, "Cod_Temp", each
                     let
@@ -350,9 +352,11 @@ let
                         cleanName= Text.Trim(Text.Replace(Text.Replace(Text.Replace(rawName, "#(lf)", " "), "#(cr)", " "), "#(00A0)", " "))
                     in cleanName, type text),
 
-                APU_DiccionarioLimpio = Table.SelectColumns(APU_Diccionario, {"Cod_Temp", "NombreActAPU", "Columna 3"}, MissingField.Ignore),
+                // La UM de la actividad esta en la columna D (Columna 4) del archivo
+                // ANALISIS DE PRECIOS UNITARIOS, no en la C.
+                APU_DiccionarioLimpio = Table.SelectColumns(APU_Diccionario, {"Cod_Temp", "NombreActAPU", "Columna 4"}, MissingField.Ignore),
                 APU_DiccionarioRenombrado = Table.RenameColumns(APU_DiccionarioLimpio,
-                    List.Select({{"Cod_Temp", "CodigoActAPU"}, {"Columna 3", "UM_Actividad"}}, each Table.HasColumns(APU_DiccionarioLimpio, _{0}))),
+                    List.Select({{"Cod_Temp", "CodigoActAPU"}, {"Columna 4", "UM_Actividad"}}, each Table.HasColumns(APU_DiccionarioLimpio, _{0}))),
                 // Ordenar antes de Distinct: si el mismo codigo aparece con 2 nombres reales
                 // en el APU (no por NBSP), Distinct siempre se queda con el mismo (el
                 // alfabeticamente primero) en vez de uno arbitrario que cambia entre refrescos.
