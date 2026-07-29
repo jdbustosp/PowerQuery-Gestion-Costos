@@ -402,6 +402,33 @@ let
                                     else recortado
                     in limpio,
 
+                // Mismo problema que el guion final, pero al INICIO del nombre
+                // (p.ej. "-SC - TOPELLANTAS (Un) - URBANISMO INTERIOR -" trae un
+                // guion colgando antes de "SC" sin nada delante que lo explique).
+                FnQuitarGuionInicial = (t as text) as text =>
+                    let
+                        recortado = Text.Trim(t),
+                        limpio    = if Text.StartsWith(recortado, "-")
+                                    then @FnQuitarGuionInicial(Text.Range(recortado, 1))
+                                    else recortado
+                    in limpio,
+
+                // Algunos nombres traen la unidad ya incrustada en el texto libre
+                // (ej. "TOPELLANTAS (Un) - URBANISMO INTERIOR"), redundante con la
+                // unidad que esta misma consulta agrega al final entre parentesis.
+                // Si el parentesis embebido coincide (sin distinguir mayusculas) con
+                // la unidad final, se quita para no duplicarla; si no coincide (ej.
+                // "(bloque fachada)" cuando la unidad final es "M2") se deja intacto
+                // porque es contenido real del nombre, no una unidad repetida.
+                FnQuitarUnidadEmbebida = (t as text, um as text) as text =>
+                    let
+                        patron    = "(" & um & ")",
+                        tUpper    = Text.Upper(t),
+                        pos       = if um = "" then -1 else Text.PositionOf(tUpper, Text.Upper(patron)),
+                        sinUnidad = if pos < 0 then t else Text.RemoveRange(t, pos, Text.Length(patron)),
+                        colapsado = Text.Combine(List.Select(Text.Split(sinUnidad, " "), each _ <> ""), " ")
+                    in colapsado,
+
                 ItemsConAPUElegido = Table.AddColumn(ItemsExpandedAPU0, "APUElegido", each
                     let
                         candidatos      = [CandidatosAPU],
@@ -458,10 +485,14 @@ let
                                         else nombreReal,
                         umTxt         = Text.Trim(Text.From(if [UM_Actividad] = null then "" else [UM_Actividad])),
                         nombreColapsado = Text.Combine(List.Select(Text.Split(nombreSinSub, " "), each _ <> ""), " "),
-                        // Quita un guion final huerfano que a veces viene ya asi en el
-                        // texto crudo de la actividad, sin relacion con el Subcapitulo
-                        // (ver FnQuitarGuionColgante mas arriba).
-                        nombreLimpio  = FnQuitarGuionColgante(nombreColapsado),
+                        // Limpieza en 2 pasadas del texto crudo de la actividad (nada de
+                        // esto tiene relacion con Subcapitulo, ya se quito arriba si aplicaba):
+                        // 1) quitar la unidad si ya viene incrustada en el nombre, redundante
+                        //    con la que se agrega mas abajo entre parentesis;
+                        // 2) quitar guiones sueltos al inicio y/o al final que a veces
+                        //    vienen asi de crudo en el reporte (ver funciones mas arriba).
+                        nombreSinUnidad  = FnQuitarUnidadEmbebida(nombreColapsado, umTxt),
+                        nombreLimpio  = FnQuitarGuionInicial(FnQuitarGuionColgante(nombreSinUnidad)),
                         actTxt        = if umTxt = "" then codTxt & "-" & nombreLimpio
                                         else codTxt & "-" & nombreLimpio & " (" & umTxt & ")"
                     in actTxt, type text),
