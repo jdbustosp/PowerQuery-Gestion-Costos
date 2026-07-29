@@ -421,15 +421,28 @@ let
                         nombreReal    = if descSegTxt <> "" then descSegTxt
                                         else if nombreExtraido <> "" then nombreExtraido
                                         else "Actividad " & codTxt,
-                        subcapTxt     = Text.Trim(Text.From(if [Subcapitulo] = null then "" else [Subcapitulo])),
+                        // Subcapitulo normalizado igual que la descripcion (NBSP->espacio,
+                        // espacios colapsados) para que la busqueda de mas abajo no falle por
+                        // una diferencia de espacios/caracteres invisibles entre los 2 campos
+                        // (vienen de columnas distintas del mismo reporte, no siempre coinciden
+                        // caracter por caracter aunque se vean iguales).
+                        subcapRaw     = Text.Trim(Text.Replace(Text.From(if [Subcapitulo] = null then "" else [Subcapitulo]), "#(00A0)", " ")),
+                        subcapTxt     = Text.Combine(List.Select(Text.Split(subcapRaw, " "), each _ <> ""), " "),
                         // Si el Subcapitulo viene pegado con un guion separador ("Texto - SUBCAP"),
                         // se quita el bloque completo (guion incluido) para no dejar un guion
                         // huerfano colgando antes de la unidad. Si no aparece con ese patron
                         // exacto, se cae al comportamiento anterior (quitar solo el texto).
+                        // La busqueda es insensible a mayusculas (Subcapitulo y la descripcion
+                        // no siempre coinciden en mayusculas/minusculas), pero el recorte se
+                        // hace sobre el texto ORIGINAL para no alterar su capitalizacion real.
                         conGuion      = if subcapTxt = "" then "" else " - " & subcapTxt,
+                        nombreRealUpper = Text.Upper(nombreReal),
+                        posConGuion   = if conGuion = "" then -1 else Text.PositionOf(nombreRealUpper, Text.Upper(conGuion)),
+                        posSubcap     = if subcapTxt = "" then -1 else Text.PositionOf(nombreRealUpper, Text.Upper(subcapTxt)),
                         nombreSinSub  = if subcapTxt = "" then nombreReal
-                                        else if Text.Contains(nombreReal, conGuion) then Text.Replace(nombreReal, conGuion, "")
-                                        else Text.Replace(nombreReal, subcapTxt, ""),
+                                        else if posConGuion >= 0 then Text.RemoveRange(nombreReal, posConGuion, Text.Length(conGuion))
+                                        else if posSubcap >= 0 then Text.RemoveRange(nombreReal, posSubcap, Text.Length(subcapTxt))
+                                        else nombreReal,
                         umTxt         = Text.Trim(Text.From(if [UM_Actividad] = null then "" else [UM_Actividad])),
                         nombreLimpio  = Text.Combine(List.Select(Text.Split(nombreSinSub, " "), each _ <> ""), " "),
                         actTxt        = if umTxt = "" then codTxt & "-" & nombreLimpio
