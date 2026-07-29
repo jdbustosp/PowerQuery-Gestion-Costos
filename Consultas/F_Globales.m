@@ -389,6 +389,19 @@ let
                         colapsado = Text.Combine(List.Select(Text.Split(sinGuion, " "), each _ <> ""), " ")
                     in colapsado,
 
+                // Algunos nombres de actividad vienen del reporte con un guion final
+                // colgando y nada detras (p.ej. "Remate muros - Aptos -"), sin que exista
+                // Subcapitulo alguno que explique ese guion (viene asi de crudo en
+                // DescActRaw/NombreActAPU). Se quita cualquier guion suelto al final del
+                // nombre, de forma recursiva por si quedara mas de uno.
+                FnQuitarGuionColgante = (t as text) as text =>
+                    let
+                        recortado = Text.Trim(t),
+                        limpio    = if Text.EndsWith(recortado, "-")
+                                    then @FnQuitarGuionColgante(Text.Range(recortado, 0, Text.Length(recortado) - 1))
+                                    else recortado
+                    in limpio,
+
                 ItemsConAPUElegido = Table.AddColumn(ItemsExpandedAPU0, "APUElegido", each
                     let
                         candidatos      = [CandidatosAPU],
@@ -444,7 +457,11 @@ let
                                         else if posSubcap >= 0 then Text.RemoveRange(nombreReal, posSubcap, Text.Length(subcapTxt))
                                         else nombreReal,
                         umTxt         = Text.Trim(Text.From(if [UM_Actividad] = null then "" else [UM_Actividad])),
-                        nombreLimpio  = Text.Combine(List.Select(Text.Split(nombreSinSub, " "), each _ <> ""), " "),
+                        nombreColapsado = Text.Combine(List.Select(Text.Split(nombreSinSub, " "), each _ <> ""), " "),
+                        // Quita un guion final huerfano que a veces viene ya asi en el
+                        // texto crudo de la actividad, sin relacion con el Subcapitulo
+                        // (ver FnQuitarGuionColgante mas arriba).
+                        nombreLimpio  = FnQuitarGuionColgante(nombreColapsado),
                         actTxt        = if umTxt = "" then codTxt & "-" & nombreLimpio
                                         else codTxt & "-" & nombreLimpio & " (" & umTxt & ")"
                     in actTxt, type text),
