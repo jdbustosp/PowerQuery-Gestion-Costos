@@ -5,19 +5,13 @@ let
     Headers = [Accept="application/json;odata=nometadata"],
     FnEncode = F_Globales[FnEncode],
 
-    // Indice liviano: solo lista carpetas y metadatos. Los binarios se descargan
-    // despues de filtrar en cada consulta consumidora.
-    FolderResponse = try Json.Document(Web.Contents(SiteUrl, [
-        RelativePath = "/_api/web/GetFolderByServerRelativeUrl('" & FnEncode(BasePath) & "')/Folders",
-        Query = [#"$select" = "Name"],
-        Headers = Headers,
-        Timeout = #duration(0, 0, 5, 0)
-    ])) otherwise null,
-
+    // Reutiliza SP_CarpetasCC (consulta compartida) en vez de repetir la MISMA
+    // llamada GetFolderByServerRelativeUrl(...)/Folders por separado - evita un
+    // viaje de red redundante (Power Query calcula SP_CarpetasCC una sola vez
+    // y la comparte entre todos sus consumidores en el mismo refresco).
     CCFolders =
-        if FolderResponse = null or not Record.HasFields(FolderResponse, "value")
-        then #table({"Name"}, {})
-        else Table.FromRecords(FolderResponse[value]),
+        try Table.RenameColumns(SP_CarpetasCC, {{"Centro de Costos", "Name"}})
+        otherwise #table({"Name"}, {}),
 
     WithFiles = Table.AddColumn(CCFolders, "Archivos", each
         let
@@ -26,7 +20,7 @@ let
                 RelativePath = "/_api/web/GetFolderByServerRelativeUrl('" & FnEncode(ccActualPath) & "')/Files",
                 Query = [#"$select" = "Name,ServerRelativeUrl,TimeLastModified,Length"],
                 Headers = Headers,
-                Timeout = #duration(0, 0, 5, 0)
+                Timeout = #duration(0, 0, 2, 0)
             ])) otherwise null
         in
             if result <> null and Record.HasFields(result, "value") then Table.FromRecords(result[value]) else null
@@ -48,6 +42,7 @@ let
             Text.Contains([FileName], "ESTADO DE ORDENES",             Comparer.OrdinalIgnoreCase) or
             Text.Contains([FileName], "INFORME ENTRADAS DE ALMACEN",   Comparer.OrdinalIgnoreCase) or
             Text.Contains([FileName], "INFORME ENTRADAS DE ALMACÉN",   Comparer.OrdinalIgnoreCase) or
+            Text.Contains([FileName], "ENTRADAS POR INSUMO",           Comparer.OrdinalIgnoreCase) or
             Text.Contains([FileName], "MASIVO SALIDAS",                Comparer.OrdinalIgnoreCase) or
             Text.Contains([FileName], "ESTADO DE CONTRATOS",           Comparer.OrdinalIgnoreCase) or
             Text.Contains([FileName], "DESCUENTOS",                    Comparer.OrdinalIgnoreCase)

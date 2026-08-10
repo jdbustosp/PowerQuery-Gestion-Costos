@@ -194,7 +194,7 @@ let
                 raw = try Web.Contents(siteUrl, [
                     RelativePath = "/_api/web/GetFileByServerRelativeUrl('" & FnEncode(filePath) & "')/$value",
                     Headers = [Accept = "*/*"],
-                    Timeout = #duration(0, 0, 10, 0),
+                    Timeout = #duration(0, 0, 2, 0),
                     ManualStatusHandling = {404, 429, 500, 502, 503, 504}
                 ]) otherwise null,
                 status = if raw = null then null else try Value.Metadata(raw)[Response.Status] otherwise 200,
@@ -512,7 +512,115 @@ let
                     "Cantidad Proyectado",  "VT Proyectado",
                     "Cantidad Consumido",   "VT Consumido"
                 })
-            in Final
+            in Final,
+
+        // Procesa "Masivo salidas DESCRIPTIVAS" (formato plano nuevo: una fila completa
+        // por insumo, sin bloques repetidos meta/subheader/total, no necesita fill-down).
+        // ColumnasBase debe venir del llamador (mismo shape que usa FxProcesarSalidas).
+        FxProcesarSalidasDescriptivas = (BinSalidas as binary, ColumnasBase as list) as table =>
+            let
+                FnText = (v as any) as text => try Text.Trim(Text.From(if v = null then "" else v)) otherwise "",
+                FnCleanDisplay = (v as any) as nullable text =>
+                    let t = FnText(v), clean = if t = "" then null else Text.Upper(Text.Trim(FnRemoveAccentMarks(t)))
+                    in clean,
+                FnBuildInsUM = (desc as any, um as any) as nullable text =>
+                    let d = FnCleanDisplay(desc), u = FnCleanDisplay(um)
+                    in if d = null then null else if u = null or u = "" then d else d & " (" & u & ")",
+                FnCleanContratistaFromDash = (v as any) as nullable text =>
+                    let t = FnText(v), afterDash = if Text.Contains(t, "-") then Text.Trim(Text.AfterDelimiter(t, "-")) else t, clean = FnCleanDisplay(afterDash)
+                    in clean,
+                Columnas = FnBuildColumnas(13),
+                Raw = Table.Buffer(Html.Table(Text.FromBinary(Binary.Buffer(BinSalidas), 28591), Columnas, [RowSelector="tr"])),
+                AddStd = Table.AddColumn(Raw, "Std", each
+                    let
+                        salidaNo = FnText(Record.Field(_, "Columna 2")),
+                        contratista = Record.Field(_, "Columna 4"),
+                        codigoIns = FnText(Record.Field(_, "Columna 7")),
+                        descripcion = Record.Field(_, "Columna 8"),
+                        item = Record.Field(_, "Columna 9"),
+                        um = Record.Field(_, "Columna 10"),
+                        cant = Record.Field(_, "Columna 11"),
+                        vrTotal = Record.Field(_, "Columna 13"),
+                        insFinal = FnBuildInsUM(descripcion, um),
+                        codAct = FnFormatCodigoAct(item)
+                    in [
+                        #"Codigo ins" = codigoIns,
+                        Ins = insFinal,
+                        Actividad = null,
+                        #"Codigo act" = codAct,
+                        InsClave = FnClaveLimpia(insFinal),
+                        #"# OC / Contrato" = null,
+                        #"Cantidad Comprado" = null,
+                        #"VT Comprado" = null,
+                        VU_Crudo = null,
+                        IVA_Crudo = null,
+                        #"Nombre Contratista" = FnCleanContratistaFromDash(contratista),
+                        #"#ENTRADA" = null,
+                        #"Cantidad Cortes" = null,
+                        #"VT Cortes" = null,
+                        #"#SALIDA" = salidaNo,
+                        #"Cantidad Cons Cols" = FxToNumberFlex(cant),
+                        #"VT Cons Cols" = FxToNumberFlex(vrTotal)
+                    ]),
+                Expanded = Table.ExpandRecordColumn(AddStd, "Std", ColumnasBase, ColumnasBase),
+                Filtrado = Table.SelectRows(Expanded, each try (Number.FromText([#"Codigo ins"]) <> null) otherwise false),
+                Selected = Table.SelectColumns(Filtrado, ColumnasBase, MissingField.UseNull)
+            in Selected,
+
+        // Procesa "Informe entradas por insumo" (formato plano nuevo: una fila completa
+        // por entrada, sin bloques repetidos meta/item que hay que reconstruir con
+        // FillDown como en FxProcesarEntradas). Mismo patron que FxProcesarSalidasDescriptivas.
+        // Columnas reales del reporte: 1 Sucursal, 2 Cod, 3 Descripcion, 4 Agrupacion, 5 UM,
+        // 6 No. OC, 7 No. EA, 8 Fecha, 9 Cantidad, 10 Vr. Unitario, 11 IVA, 12 Valor Total,
+        // 13 Proveedor, 14 Obs.
+        FxProcesarEntradasPorInsumo = (BinEntradas as binary, ColumnasBase as list) as table =>
+            let
+                FnText = (v as any) as text => try Text.Trim(Text.From(if v = null then "" else v)) otherwise "",
+                FnCleanDisplay = (v as any) as nullable text =>
+                    let t = FnText(v), clean = if t = "" then null else Text.Upper(Text.Trim(FnRemoveAccentMarks(t)))
+                    in clean,
+                FnBuildInsUM = (desc as any, um as any) as nullable text =>
+                    let d = FnCleanDisplay(desc), u = FnCleanDisplay(um)
+                    in if d = null then null else if u = null or u = "" then d else d & " (" & u & ")",
+                FnCleanContratistaFromDash = (v as any) as nullable text =>
+                    let t = FnText(v), afterDash = if Text.Contains(t, "-") then Text.Trim(Text.AfterDelimiter(t, "-")) else t, clean = FnCleanDisplay(afterDash)
+                    in clean,
+                Columnas = FnBuildColumnas(14),
+                Raw = Table.Buffer(Html.Table(Text.FromBinary(Binary.Buffer(BinEntradas), 28591), Columnas, [RowSelector="tr"])),
+                AddStd = Table.AddColumn(Raw, "Std", each
+                    let
+                        codigoIns = FnText(Record.Field(_, "Columna 2")),
+                        descripcion = Record.Field(_, "Columna 3"),
+                        um = Record.Field(_, "Columna 5"),
+                        ocNo = FnText(Record.Field(_, "Columna 6")),
+                        eaNo = FnText(Record.Field(_, "Columna 7")),
+                        cantidad = Record.Field(_, "Columna 9"),
+                        valorTotal = Record.Field(_, "Columna 12"),
+                        proveedor = Record.Field(_, "Columna 13"),
+                        insFinal = FnBuildInsUM(descripcion, um)
+                    in [
+                        #"Codigo ins" = codigoIns,
+                        Ins = insFinal,
+                        Actividad = null,
+                        #"Codigo act" = null,
+                        InsClave = FnClaveLimpia(insFinal),
+                        #"# OC / Contrato" = ocNo,
+                        #"Cantidad Comprado" = null,
+                        #"VT Comprado" = null,
+                        VU_Crudo = null,
+                        IVA_Crudo = null,
+                        #"Nombre Contratista" = FnCleanContratistaFromDash(proveedor),
+                        #"#ENTRADA" = eaNo,
+                        #"Cantidad Cortes" = FxToNumberFlex(cantidad),
+                        #"VT Cortes" = FxToNumberFlex(valorTotal),
+                        #"#SALIDA" = null,
+                        #"Cantidad Cons Cols" = null,
+                        #"VT Cons Cols" = null
+                    ]),
+                Expanded = Table.ExpandRecordColumn(AddStd, "Std", ColumnasBase, ColumnasBase),
+                Filtrado = Table.SelectRows(Expanded, each try (Number.FromText([#"Codigo ins"]) <> null) otherwise false),
+                Selected = Table.SelectColumns(Filtrado, ColumnasBase, MissingField.UseNull)
+            in Selected
     ]
 in
     Funciones

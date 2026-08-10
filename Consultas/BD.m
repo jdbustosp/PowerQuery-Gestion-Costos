@@ -60,8 +60,20 @@ let
 
     ColumnasReordenadas = Table.SelectColumns(OrigenLimpio, ColumnasOrden, MissingField.Ignore),
 
+    // Recorte TEMPRANO (solo La Arboleda): estas 16 columnas no se usan en NINGUN calculo
+    // intermedio de todo el pipeline (verificado: 0 referencias [Campo] en BD.m), asi que
+    // se quitan aqui mismo en vez de esperar al final. Esto reduce el ancho de tabla que
+    // procesan TODOS los pasos siguientes (TransformColumns, ReplaceErrorValues, Table.Group,
+    // NestedJoin), no solo la escritura final a la hoja.
+    ColumnasReordenadas_Trim = Table.RemoveColumns(ColumnasReordenadas, {
+        "Codigo ins", "V/U Comprado", "V/U Contratado", "V/U Presupuesto",
+        "Cantidad Cortes", "Cantidad Cons Cols", "VT Cons Cols", "Cantidad_Calc",
+        "V/U ppto (CC)", "Estado", "Fecha_de_pago", "Clasificador_Actividad",
+        "Capitulo_Costo directo", "NIT", "No_Factura", "Fecha_Factura"
+    }, MissingField.Ignore),
+
     // try/otherwise en cada transformacion: si Text.From recibe algo raro (record, list, etc) no rompe
-    LlavesLimpias = Table.TransformColumns(ColumnasReordenadas, {
+    LlavesLimpias = Table.TransformColumns(ColumnasReordenadas_Trim, {
         {"Centro de Costos",     each try (if _ = null then "" else Text.Upper(Text.Trim(Text.From(_)))) otherwise "", type text},
         {"Codigo act",           each try (if _ = null then "" else Text.Upper(Text.Trim(Text.From(_)))) otherwise "", type text},
         {"Ins",                  each try (if _ = null then "" else Text.Upper(Text.Trim(FnRemoveAccentMarks(_)))) otherwise "", type text},
@@ -72,7 +84,10 @@ let
         {"Descripcion contrato", each try FnRemoveAccentsSymbols(if _ = null then null else Text.Trim(Text.From(_))) otherwise null, type text}
     }, null, MissingField.Ignore),
 
-    FiltroTipoValido = Table.SelectRows(LlavesLimpias, each [Tipo] <> null and [Tipo] <> ""),
+    // Buffer: FiltroTipoValido se usa 2 veces (ClasificadorRows y BaseClasificada) — sin buffer,
+    // cada referencia puede forzar recalcular toda la cadena previa (Origen: Combine de 9 fuentes
+    // + ReplaceErrorValues sobre 53 columnas, el paso mas caro conocido de BD).
+    FiltroTipoValido = Table.Buffer(Table.SelectRows(LlavesLimpias, each [Tipo] <> null and [Tipo] <> "")),
 
     // 🚀 Lookup por Record para Clasificadores (O(1) por fila en vez de JOIN O(N))
     ClasificadorRows = Table.SelectRows(
@@ -178,7 +193,9 @@ let
             if digits <> null and digits <> "" then digits else t,
 
     RelKeys1 = Table.AddColumn(FinalSinErrores, "__OC_Key", each CleanOCKey([#"# OC / Contrato"]), type text),
-    RelKeys = Table.AddColumn(RelKeys1, "__NoProv_Key", each CleanKeyText([No_Prov]), type text),
+    // Buffer: RelKeys se usa 2 veces (ProvisionesPorOC y CruceNoProvOC) — mismo patron que
+    // FiltroTipoValido arriba.
+    RelKeys = Table.Buffer(Table.AddColumn(RelKeys1, "__NoProv_Key", each CleanKeyText([No_Prov]), type text)),
 
     ProvisionesPorOC = Table.Buffer(Table.Group(
         Table.SelectRows(RelKeys, each [__OC_Key] <> null and [__NoProv_Key] <> null),
@@ -204,6 +221,31 @@ let
             type text
         }
     }, null, MissingField.Ignore),
-    TablaMaestraFinal = Table.Buffer(FinalOCLimpia)
+
+    // ============================================================
+    // RECORTE DE COLUMNAS (SOLO LA ARBOLEDA): las 5 tablas dinamicas de
+    // este libro especificamente solo usan 31 de las 55 columnas de BD.
+    // Escribir menos columnas a la hoja reduce proporcionalmente el costo
+    // de escritura de celdas + reconstruccion de pivotCache (el cuello de
+    // botella dominante para este proyecto, el mas grande de todos).
+    // Lista confirmada y ajustada por el usuario el 2026-08-06.
+    // OJO: este recorte es especifico de La Arboleda - NO aplicar el mismo
+    // archivo a otros proyectos sin revisar que sus dinamicas usen las
+    // mismas columnas.
+    // ============================================================
+    ColumnasFinalesArboleda = {
+        "Centro de Costos", "Ins", "Actividad", "Capitulo", "Subcapitulo", "Tipo",
+        "# OC / Contrato", "#ENTRADA", "#SALIDA", "Descripcion contrato", "# CC - Comparativo",
+        "Cantidad Proyectado", "VT Proyectado", "Cantidad Consumido", "VT Consumido",
+        "Cantidad Presupuesto", "VT Presupuesto",
+        "Cant. aprobacion", "V/U aprobacion", "VR total aprobacion",
+        "Valor Total ppto (CC)", "VT Cortes", "Valor descuento",
+        "Cantidad CC Cons", "V/U CC cons", "VT CC cons",
+        "VR_Bruto_con_desc", "No_Prov", "Nombre Contratista",
+        "VT Asegurada", "VT Proyectado Colsubsidio"
+    },
+    FinalRecortada = Table.SelectColumns(FinalOCLimpia, ColumnasFinalesArboleda, MissingField.UseNull),
+
+    TablaMaestraFinal = Table.Buffer(FinalRecortada)
 in
     TablaMaestraFinal

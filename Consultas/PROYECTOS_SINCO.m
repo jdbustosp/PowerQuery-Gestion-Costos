@@ -23,9 +23,13 @@ let
             Timeout = #duration(0, 0, 2, 0)
         ])) otherwise null,
 
-    Intentos = List.Transform(CarpetasCandidatas, each [Resp = FnListarCarpeta(_)]),
-    IntentoValido = List.First(List.Select(Intentos, each [Resp] <> null and Record.HasFields([Resp], "value")), null),
-    Resp = if IntentoValido = null then null else IntentoValido[Resp],
+    // Perezoso: prueba la 1a candidata y solo intenta la 2a si la 1a falla
+    // (mismo fix que DESCARGAS.m - List.Transform llamaba SIEMPRE a ambas).
+    Resp1 = FnListarCarpeta(CarpetasCandidatas{0}),
+    Resp1Valido = Resp1 <> null and Record.HasFields(Resp1, "value"),
+    Resp = if Resp1Valido then Resp1
+           else let Resp2 = FnListarCarpeta(CarpetasCandidatas{1}) in
+                if Resp2 <> null and Record.HasFields(Resp2, "value") then Resp2 else null,
 
     Archivos =
         if Resp = null or not Record.HasFields(Resp, "value")

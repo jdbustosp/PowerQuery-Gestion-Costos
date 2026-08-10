@@ -9,6 +9,7 @@ let
     FnMapColumn = F_Globales[FnMapColumn],
     FnReadSPBinary = F_Globales[FnReadSPBinary],
     FnRemoveAccentMarks = F_Globales[FnRemoveAccentMarks],
+    FnRemoveAccentsSymbols = F_Globales[FnRemoveAccentsSymbols],
     SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
     Columnas_OC = F_Globales[FnBuildColumnas](10),
     Columnas_Entradas = F_Globales[FnBuildColumnas](10),
@@ -68,7 +69,38 @@ let
         LibroExcel = Excel.Workbook(Binary.Buffer(BinDetalles), null, true),
         DetallesCrudos = FnPrepareTableWithHeader(LibroExcel{0}[Data]),
         Cols = Table.ColumnNames(DetallesCrudos),
-        MapStd = Table.AddColumn(DetallesCrudos, "Std", each [ Codigo_ins = FnMapColumn(_, Cols, {"CÓDIGO", "CODIGO", "COD."}), Ins = FnMapColumn(_, Cols, {"INSUMO", "DESCRIPCIÓN", "DESCRIPCION"}), Act = FnMapColumn(_, Cols, {"ACTIVIDAD", "DESTINO", "FRENTE", "ITEM", "ÍTEM"}), Cant = FnMapColumn(_, Cols, {"CANTIDAD", "CANT."}), VU_Crudo = try Record.FieldValues(_){10} otherwise FnMapColumn(_, Cols, {"VALOR UNITARIO", "VLR UNIT", "UNITARIO"}), IVA_Crudo = try Record.FieldValues(_){11} otherwise FnMapColumn(_, Cols, {"IVA %", "IVA", "% IVA"}), VT = try Record.FieldValues(_){12} otherwise FnMapColumn(_, Cols, {"VALOR TOTAL", "VLR TOTAL", "TOTAL"}), OC = FnMapColumn(_, Cols, {"ORDEN", "PEDIDO", "O.C"}) ]),
+        // FnMapColumn no depende de la fila, solo de Cols+keywords (siempre fijos aqui) —
+        // resolver el nombre de columna UNA sola vez en vez de re-buscarlo en cada fila
+        // (antes: 8 busquedas completas de texto por fila x N filas, todas con el mismo resultado).
+        // Misma logica de match que FnMapColumn (F_Globales), pero devolviendo el NOMBRE de
+        // columna en vez del valor, para poder resolverla una sola vez fuera del loop por fila.
+        FnResolverCol = (keywords as list) as nullable text =>
+            let
+                norm = (x as any) as text =>
+                    let
+                        txt = try Text.From(x) otherwise "",
+                        clean = FnRemoveAccentsSymbols(txt)
+                    in Text.Upper(if clean = null then "" else clean),
+                match = List.First(List.Select(Cols, (c) => List.AnyTrue(List.Transform(keywords, (k) => Text.Contains(norm(c), norm(k))))), null)
+            in match,
+        ColCodigoIns = FnResolverCol({"CÓDIGO", "CODIGO", "COD."}),
+        ColIns = FnResolverCol({"INSUMO", "DESCRIPCIÓN", "DESCRIPCION"}),
+        ColAct = FnResolverCol({"ACTIVIDAD", "DESTINO", "FRENTE", "ITEM", "ÍTEM"}),
+        ColCant = FnResolverCol({"CANTIDAD", "CANT."}),
+        ColVU = FnResolverCol({"VALOR UNITARIO", "VLR UNIT", "UNITARIO"}),
+        ColIVA = FnResolverCol({"IVA %", "IVA", "% IVA"}),
+        ColVT = FnResolverCol({"VALOR TOTAL", "VLR TOTAL", "TOTAL"}),
+        ColOC = FnResolverCol({"ORDEN", "PEDIDO", "O.C"}),
+        MapStd = Table.AddColumn(DetallesCrudos, "Std", each [
+            Codigo_ins = if ColCodigoIns = null then null else Record.Field(_, ColCodigoIns),
+            Ins = if ColIns = null then null else Record.Field(_, ColIns),
+            Act = if ColAct = null then null else Record.Field(_, ColAct),
+            Cant = if ColCant = null then null else Record.Field(_, ColCant),
+            VU_Crudo = try Record.FieldValues(_){10} otherwise (if ColVU = null then null else Record.Field(_, ColVU)),
+            IVA_Crudo = try Record.FieldValues(_){11} otherwise (if ColIVA = null then null else Record.Field(_, ColIVA)),
+            VT = try Record.FieldValues(_){12} otherwise (if ColVT = null then null else Record.Field(_, ColVT)),
+            OC = if ColOC = null then null else Record.Field(_, ColOC)
+        ]),
         DetallesStd = Table.ExpandRecordColumn(MapStd, "Std", {"Codigo_ins", "Ins", "Act", "Cant", "VT", "VU_Crudo", "IVA_Crudo", "OC"}, {"Codigo ins", "Ins", "Actividad", "Cantidad Comprado", "VT Comprado", "VU_Crudo", "IVA_Crudo", "# OC / Contrato"}),
         DetConKeyOC = Table.AddColumn(DetallesStd, "OC_Key", each FnText([#"# OC / Contrato"]), type text),
         DetConCodAct = Table.AddColumn(DetConKeyOC, "Codigo act", each let c = Text.Trim(Text.BeforeDelimiter(FnText([Actividad]), "-", 0)) in if c = "" then null else c, type text),
@@ -196,6 +228,7 @@ let
         Text.Contains([Name], "ESTADO DE ORDENES", Comparer.OrdinalIgnoreCase) or
         Text.Contains([Name], "INFORME ENTRADAS DE ALMACEN", Comparer.OrdinalIgnoreCase) or
         Text.Contains([Name], "INFORME ENTRADAS DE ALMACÉN", Comparer.OrdinalIgnoreCase) or
+        Text.Contains([Name], "ENTRADAS POR INSUMO", Comparer.OrdinalIgnoreCase) or
         Text.Contains([Name], "MASIVO SALIDAS", Comparer.OrdinalIgnoreCase)
     ),
     ConCentroCosto = ArchivosProyecto,
@@ -220,26 +253,42 @@ let
         in
             if path = null then null else FnReadSPBinary(SiteUrl, path),
 
-    Agrupado = Table.Group(ConCentroCosto, {"Centro de Costos"}, {{"Binarios", each
+    // === Preferir formato liviano (plano, sin fill-down) si existe en SharePoint,
+    // con respaldo automatico al formato "detallado" viejo si el proyecto aun no
+    // tiene el reporte nuevo subido. Nunca rompe: si no hay ninguno, retorna null.
+    PickPreferido = (t as table, containsLiviano as text, containsViejo as text) as record =>
         let
-            binDet = PickLatestBinary(_, "INFORMEORDEN"),
-            binOC = PickLatestBinary(_, "ESTADO DE ORDENES"),
-            binEntradas = PickLatestBinaryAny(_, {"INFORME ENTRADAS DE ALMACEN", "INFORME ENTRADAS DE ALMACÉN"}),
-            binSalidas = PickLatestBinary(_, "MASIVO SALIDAS")
-        in
-            if binDet <> null or binEntradas <> null or binSalidas <> null then [Bin_Det = binDet, Bin_OC = binOC, Bin_Entradas = binEntradas, Bin_Salidas = binSalidas] else null
-    }}),
-    CentrosCompletos = Table.SelectRows(Agrupado, each [Binarios] <> null),
-    TablaConDatos = Table.AddColumn(CentrosCompletos, "Datos", each
+            candLiviano = Table.Sort(Table.SelectRows(t, each Text.Contains([Name], containsLiviano, Comparer.OrdinalIgnoreCase)), {{"TimeLastModified", Order.Descending}, {"Name", Order.Ascending}}),
+            hayLiviano = Table.RowCount(candLiviano) > 0,
+            candViejo = Table.Sort(Table.SelectRows(t, each Text.Contains([Name], containsViejo, Comparer.OrdinalIgnoreCase) and not Text.Contains([Name], containsLiviano, Comparer.OrdinalIgnoreCase)), {{"TimeLastModified", Order.Descending}, {"Name", Order.Ascending}}),
+            path = if hayLiviano then candLiviano{0}[ServerRelativeUrl] else if Table.RowCount(candViejo) > 0 then candViejo{0}[ServerRelativeUrl] else null,
+            bin = if path = null then null else FnReadSPBinary(SiteUrl, path)
+        in [Binario = bin, EsLiviano = hayLiviano],
+
+    // === List.Transform en vez de Table.Group + AddColumn anidado ===
+    // Confirmado por prueba: el mismo trabajo via Table.Group tardaba 402s vs
+    // 133s via List.Transform (3x mas rapido), para el mismo Centro de Costo.
+    CCsConArchivos = List.Distinct(ConCentroCosto[Centro de Costos]),
+    ResultadosPorCC = List.Transform(CCsConArchivos, (cc) =>
         let
-            bins = [Binarios],
-            tCompras = if bins[Bin_Det] <> null and bins[Bin_OC] <> null then FxProcesarCompras(bins[Bin_Det], bins[Bin_OC]) else EmptyCompras,
-            tEntradas = if bins[Bin_Entradas] <> null then FxProcesarEntradas(bins[Bin_Entradas]) else EmptyCompras,
-            tSalidas = if bins[Bin_Salidas] <> null then FxProcesarSalidas(bins[Bin_Salidas]) else EmptyCompras
+            filtrado = Table.SelectRows(ConCentroCosto, each [Centro de Costos] = cc),
+            binDet = PickLatestBinary(filtrado, "INFORMEORDEN"),
+            binOC = PickLatestBinary(filtrado, "ESTADO DE ORDENES"),
+            resEntradas = PickPreferido(filtrado, "ENTRADAS POR INSUMO", "INFORME ENTRADAS DE ALMACEN"),
+            resSalidas = PickPreferido(filtrado, "DESCRIPTIVAS", "MASIVO SALIDAS"),
+            tCompras = if binDet <> null and binOC <> null then FxProcesarCompras(binDet, binOC) else EmptyCompras,
+            tEntradas = if resEntradas[Binario] = null then EmptyCompras
+                        else if resEntradas[EsLiviano] then F_Globales[FxProcesarEntradasPorInsumo](resEntradas[Binario], ColumnasBase)
+                        else FxProcesarEntradas(resEntradas[Binario]),
+            tSalidas = if resSalidas[Binario] = null then EmptyCompras
+                       else if resSalidas[EsLiviano] then F_Globales[FxProcesarSalidasDescriptivas](resSalidas[Binario], ColumnasBase)
+                       else FxProcesarSalidas(resSalidas[Binario]),
+            combinado = Table.Combine({tCompras, tEntradas, tSalidas}),
+            conCC = Table.AddColumn(combinado, "Centro de Costos", each cc, type text)
         in
-            Table.Combine({tCompras, tEntradas, tSalidas})
+            conCC
     ),
-    Expandido = Table.ExpandTableColumn(TablaConDatos, "Datos", ColumnasBase, ColumnasBase),
+    Expandido = Table.Combine(ResultadosPorCC),
 
     Expandido_Clean = Table.TransformColumns(Expandido, {
         {"Centro de Costos", each if _ = null then null else Text.Upper(Text.Trim(Text.From(_))), type text},
@@ -256,7 +305,10 @@ let
         {"Centro de Costos", each if _ = null then null else Text.Upper(Text.Trim(Text.From(_))), type text},
         {"Codigo act", each FnFormatCodigoAct(_), type text}
     }, null, MissingField.Ignore),
-    ITEMS_Base = Table.SelectColumns(ITEMS_Clean, {"Centro de Costos", "Codigo ins", "Ins", "Codigo act", "Actividad", "Capitulo", "Subcapitulo"}),
+    // Buffer: ITEMS_Base se usa 3 veces (ITEMS_Insumos_Dist, ItemsPorCodigo_Estricto,
+    // ItemsPorCodigo_Generico) — sin buffer, cada uno recalcula TransformColumns+SelectColumns
+    // desde cero en vez de reusar el resultado ya calculado.
+    ITEMS_Base = Table.Buffer(Table.SelectColumns(ITEMS_Clean, {"Centro de Costos", "Codigo ins", "Ins", "Codigo act", "Actividad", "Capitulo", "Subcapitulo"})),
 
     ITEMS_Insumos_Dist = Table.Buffer(Table.Distinct(Table.AddColumn(ITEMS_Base, "InsClave", each FnClaveLimpia([Ins]), type text), {"Centro de Costos", "Codigo act", "InsClave"})),
     ITEMS_Respaldo = Table.Buffer(Table.Distinct(ITEMS_Insumos_Dist, {"Centro de Costos", "InsClave"})),

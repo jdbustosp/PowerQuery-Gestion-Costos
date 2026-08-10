@@ -39,9 +39,15 @@ let
             Timeout = #duration(0, 0, 2, 0)
         ])) otherwise null,
 
-    Intentos = List.Transform(CarpetasCandidatas, each [Resp = FnListarCarpeta(_)]),
-    IntentoValido = List.First(List.Select(Intentos, each [Resp] <> null and Record.HasFields([Resp], "value")), null),
-    Listado = if IntentoValido = null then null else IntentoValido[Resp],
+    // Perezoso: prueba la 1a candidata y solo intenta la 2a si la 1a falla,
+    // en vez de llamar SIEMPRE a ambas con List.Transform (List.Transform evalua
+    // cada elemento sin importar si el primero ya tuvo exito - un viaje de red
+    // desperdiciado en cada refresco desde que la carpeta volvio a su ruta original).
+    Resp1 = FnListarCarpeta(CarpetasCandidatas{0}),
+    Resp1Valido = Resp1 <> null and Record.HasFields(Resp1, "value"),
+    Listado = if Resp1Valido then Resp1
+              else let Resp2 = FnListarCarpeta(CarpetasCandidatas{1}) in
+                   if Resp2 <> null and Record.HasFields(Resp2, "value") then Resp2 else null,
 
     // ---------- Localizar el archivo del proyecto dentro de esa carpeta ----------
     Archivos =
