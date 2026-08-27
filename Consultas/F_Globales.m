@@ -95,6 +95,21 @@ let
         FnTrimText = (t as any) as nullable text =>
             try (if t = null then null else Text.Trim(Text.From(t))) otherwise null,
 
+        // Normaliza espacios: convierte espacios duros (nbsp) a normales, colapsa espacios
+        // repetidos internos a uno solo y recorta extremos. Usar en campos de texto que
+        // sirven como clave de cruce entre fuentes (ej. "# CC - Comparativo"), donde un
+        // doble espacio invisible rompe el match.
+        FnNormalizeSpaces = (t as any) as nullable text =>
+            try (
+                if t = null then null
+                else
+                    let
+                        txt = Text.Replace(Text.From(t), "#(00A0)", " "),
+                        partes = List.Select(Text.Split(txt, " "), each _ <> ""),
+                        unido = Text.Combine(partes, " ")
+                    in if unido = "" then null else unido
+            ) otherwise null,
+
         FnPrepareTableWithHeader = (tbl as table) as table =>
             let
                 firstColName   = Table.ColumnNames(tbl){0},

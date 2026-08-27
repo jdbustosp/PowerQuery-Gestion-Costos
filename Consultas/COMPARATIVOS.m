@@ -4,6 +4,7 @@ let
     // ============================================================
     FnFormatCodigoAct = F_Globales[FnFormatCodigoAct],
     FxToNumberFlex = F_Globales[FxToNumberFlex],
+    FnNormalizeSpaces = F_Globales[FnNormalizeSpaces],
 
     // ============================================================
     // PROCESAMIENTO DE LA TABLA MANUAL (Det_CC sin columnas PPTO)
@@ -38,9 +39,10 @@ let
         {"Subcapitulo", each if _ = null then null else Text.Trim(Text.From(_)), type text},
         {"# OC / Contrato", each if _ = null then null else Text.Trim(Text.From(_)), type text},
         {"Nombre Contratista", each if _ = null then null else Text.Trim(Text.From(_)), type text},
-        {"# CC - Comparativo", each if _ = null then null else Text.Trim(Text.From(_)), type text},
-        {"# CC", each if _ = null then null else Text.Trim(Text.From(_)), type text},
-        {"Comparativo", each if _ = null then null else Text.Trim(Text.From(_)), type text},
+        // Claves de cruce contra APROBACIONES_SP: normalizar espacios (dobles/duros), no solo Trim
+        {"# CC - Comparativo", each FnNormalizeSpaces(_), type text},
+        {"# CC", each FnNormalizeSpaces(_), type text},
+        {"Comparativo", each FnNormalizeSpaces(_), type text},
         {"Clasificador", each if _ = null then null else Text.Trim(Text.From(_)), type text},
         
         {"Cant. aprobacion", each FxToNumberFlex(_), type number},
