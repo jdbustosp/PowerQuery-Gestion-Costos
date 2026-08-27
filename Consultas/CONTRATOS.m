@@ -3,6 +3,7 @@ let
     // 1. FUNCIONES AUXILIARES GLOBALES
     // ============================================================
     FnFormatCodigoAct = F_Globales[FnFormatCodigoAct],
+    FnDecodeHtml = F_Globales[FnDecodeHtml],
     FxToNumberFlex = F_Globales[FxToNumberFlex],
     FnClaveLimpia = F_Globales[FnClaveLimpia],
     FnReadSPBinary = F_Globales[FnReadSPBinary],
@@ -16,7 +17,7 @@ let
         let
             // 🚀 Excel.Workbook es más rápido que Html.Table
             Source_Raw = try Excel.Workbook(BinarioCortes, null, true){0}[Data]
-                     otherwise Html.Table(Text.FromBinary(BinarioCortes, 65001), Columnas_HTML, [RowSelector="tr"]),
+                     otherwise Html.Table(FnDecodeHtml(BinarioCortes), Columnas_HTML, [RowSelector="tr"]),
             // Estandarizar nombres de columnas
             Source_ColNames = Table.ColumnNames(Source_Raw),
             Source = Table.RenameColumns(Source_Raw, List.Zip({Source_ColNames, List.Transform({1..List.Count(Source_ColNames)}, each "Columna" & Text.From(_))})),

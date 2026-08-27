@@ -3,6 +3,7 @@ let
     // FUNCIONES AUXILIARES GLOBALES
     // ============================================================
     FnFormatCodigoAct = F_Globales[FnFormatCodigoAct],
+    FnDecodeHtml = F_Globales[FnDecodeHtml],
     FnPrepareTableWithHeader = F_Globales[FnPrepareTableWithHeader],
     FxToNumberFlex = F_Globales[FxToNumberFlex],
     FnClaveLimpia = F_Globales[FnClaveLimpia],
@@ -60,7 +61,7 @@ let
     // ============================================================
     FxProcesarCompras = (BinDetalles as binary, BinOC as binary) as table => let
         RawOC_Raw = try Excel.Workbook(BinOC, null, true){0}[Data]
-                otherwise Html.Table(Text.FromBinary(Binary.Buffer(BinOC), 65001), Columnas_OC, [RowSelector="tr"]),
+                otherwise Html.Table(FnDecodeHtml(BinOC), Columnas_OC, [RowSelector="tr"]),
         RawOC = FnRenameSequential(RawOC_Raw),
 
         AddOCKey = Table.AddColumn(RawOC, "OC_Key_Temp", each let v = FnText([Columna1]) in if Text.StartsWith(v, "Orden de Compra No.") then Text.Trim(Text.Replace(v, "Orden de Compra No.", "")) else null, type text),
@@ -116,7 +117,7 @@ let
     // ============================================================
     FxProcesarEntradas = (BinEntradas as binary) as table => let
         Raw_Raw = try Excel.Workbook(Binary.Buffer(BinEntradas), null, true){0}[Data]
-                otherwise Html.Table(Text.FromBinary(Binary.Buffer(BinEntradas), 65001), Columnas_Entradas, [RowSelector="tr"]),
+                otherwise Html.Table(FnDecodeHtml(BinEntradas), Columnas_Entradas, [RowSelector="tr"]),
         // FillDown O(N): se marca cada fila de encabezado una sola vez y se arrastra
         // hacia abajo, en lugar de re-escanear toda la tabla por cada fila (O(N^2)).
         Raw = Table.Buffer(FnRenameSequential(Raw_Raw)),
@@ -171,7 +172,7 @@ let
     // PROCESAR MASIVO SALIDAS DETALLADO
     // ============================================================
     FxProcesarSalidas = (BinSalidas as binary) as table => let
-        Raw_Raw = Html.Table(Text.FromBinary(Binary.Buffer(BinSalidas), 28591), Columnas_Salidas, [RowSelector="tr"]),
+        Raw_Raw = Html.Table(FnDecodeHtml(BinSalidas), Columnas_Salidas, [RowSelector="tr"]),
         // FillDown O(N): mismo patron que en Entradas para evitar el re-escaneo O(N^2).
         Raw = Table.Buffer(FnRenameSequential(Raw_Raw)),
         ConFlagMeta = Table.AddColumn(Raw, "__esMeta", each

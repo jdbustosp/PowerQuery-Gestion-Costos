@@ -3,6 +3,7 @@ let
     ParamProyecto = Text.Trim(ProyectoActual),
     FechaVersion = try Text.Trim(Text.From(FechaVersionSINCO)) otherwise "",
     FnEncode = F_Globales[FnEncode],
+    FnDecodeHtml = F_Globales[FnDecodeHtml],
     FnReadSPBinary = F_Globales[FnReadSPBinary],
     FxToNumberFlex = F_Globales[FxToNumberFlex],
     Columnas = F_Globales[FnBuildColumnas](15),
@@ -35,7 +36,7 @@ let
 
     FnTable = (bin as binary) as table =>
         try Excel.Workbook(Binary.Buffer(bin), null, true){0}[Data]
-        otherwise Html.Table(Text.FromBinary(Binary.Buffer(bin), 28591), Columnas, [RowSelector="tr"]),
+        otherwise Html.Table(FnDecodeHtml(bin), Columnas, [RowSelector="tr"]),
     FnRename = (tbl as table) as table => Table.RenameColumns(tbl, List.Zip({Table.ColumnNames(tbl), List.Transform({1..List.Count(Table.ColumnNames(tbl))}, each "Columna" & Text.From(_))})),
     Actual = Table.SelectRows(COMPRAS, each [#"# OC / Contrato"] <> null and FnDigits([#"# OC / Contrato"]) <> null),
     ActualKey = Table.AddColumn(Actual, "__Key", each [Centro de Costos] & "|" & FnDigits([#"# OC / Contrato"]), type text),

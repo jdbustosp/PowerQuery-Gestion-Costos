@@ -6,6 +6,7 @@ let
     SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
     Headers = [Accept="application/json;odata=nometadata"],
     FnEncode = F_Globales[FnEncode],
+    FnDecodeHtml = F_Globales[FnDecodeHtml],
     ArchivosProyecto = Table.Buffer(SP_Archivos_Proyecto),
 
     FxGetBinary = (textoArchivo as text) as binary =>
@@ -35,7 +36,7 @@ let
     // 2. EXTRACCIÓN DEL DICCIONARIO: "SEGUIMIENTO POR ITEMS"
     // =========================================================
     BinarioSeg = FxGetBinary("SEGUIMIENTO POR ITEMS"),
-    TextoHTML_Seg = Text.FromBinary(BinarioSeg, 65001),
+    TextoHTML_Seg = FnDecodeHtml(BinarioSeg),
     
     ColsSeg_HTML = List.Transform({1..3}, each {"Columna" & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}),
     TablaSegCruda = Html.Table(TextoHTML_Seg, ColsSeg_HTML, [RowSelector="tr"]),
@@ -50,7 +51,7 @@ let
     // 3. EXTRACCIÓN DE LA BASE PRINCIPAL: "ANALISIS DE PRECIOS"
     // =========================================================
     BinarioAPU = FxGetBinary("ANALISIS DE PRECIOS UNITARIOS"),
-    TextoHTML_APU = Text.FromBinary(BinarioAPU, 65001), 
+    TextoHTML_APU = FnDecodeHtml(BinarioAPU), 
     
     Columnas_HTML = List.Transform({1..10}, each {"Columna" & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}),
     TablaCruda = Html.Table(TextoHTML_APU, Columnas_HTML, [RowSelector="tr"]),

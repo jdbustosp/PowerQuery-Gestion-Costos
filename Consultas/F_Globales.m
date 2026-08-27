@@ -95,10 +95,11 @@ let
         FnTrimText = (t as any) as nullable text =>
             try (if t = null then null else Text.Trim(Text.From(t))) otherwise null,
 
-        // Normaliza espacios: convierte espacios duros (nbsp) a normales, colapsa espacios
-        // repetidos internos a uno solo y recorta extremos. Usar en campos de texto que
-        // sirven como clave de cruce entre fuentes (ej. "# CC - Comparativo"), donde un
-        // doble espacio invisible rompe el match.
+        // Normaliza claves de texto para cruces entre fuentes (ej. "# CC - Comparativo"):
+        // 1) espacios duros (nbsp) -> normales, 2) colapsa espacios repetidos internos,
+        // 3) quita espacios alrededor de guiones ("002 - NOMBRE" -> "002-NOMBRE", forma
+        //    compacta que usa la tabla manual Det_CC), 4) recorta extremos.
+        // Debe aplicarse EN AMBOS LADOS de un join con la misma funcion.
         FnNormalizeSpaces = (t as any) as nullable text =>
             try (
                 if t = null then null
@@ -106,9 +107,25 @@ let
                     let
                         txt = Text.Replace(Text.From(t), "#(00A0)", " "),
                         partes = List.Select(Text.Split(txt, " "), each _ <> ""),
-                        unido = Text.Combine(partes, " ")
-                    in if unido = "" then null else unido
+                        unido = Text.Combine(partes, " "),
+                        sinEspGuion = Text.Replace(Text.Replace(unido, " -", "-"), "- ", "-")
+                    in if sinEspGuion = "" then null else sinEspGuion
             ) otherwise null,
+
+        // Decodifica un binario HTML/texto de los reportes SINCO detectando la codificacion:
+        // intenta UTF-8 y, si el resultado trae el caracter de reemplazo U+FFFD (tipico de
+        // decodificar Latin-1/Windows-1252 como UTF-8: la enie y tildes se vuelven "?"),
+        // re-decodifica como ISO-8859-1. Los reportes de SINCO/Oracle vienen mezclados en
+        // ambas codificaciones segun el modulo que los exporta — NUNCA usar un codepage
+        // fijo en Text.FromBinary para estos archivos, usar siempre esta funcion.
+        FnDecodeHtml = (bin as binary) as text =>
+            let
+                buf = Binary.Buffer(bin),
+                utf8 = try Text.FromBinary(buf, TextEncoding.Utf8) otherwise null,
+                usarLatin1 = utf8 = null or Text.Contains(utf8, "#(FFFD)"),
+                result = if usarLatin1 then Text.FromBinary(buf, 28591) else utf8
+            in
+                result,
 
         FnPrepareTableWithHeader = (tbl as table) as table =>
             let
@@ -232,7 +249,7 @@ let
                 Columnas_APU  = FnBuildColumnas(3),
 
                 OrigenItems   = try Excel.Workbook(BinarioSeguimiento, null, true){0}[Data]
-                                otherwise Html.Table(Text.FromBinary(BinarioSeguimiento, 65001), Columnas_HTML, [RowSelector="tr"]),
+                                otherwise Html.Table(FnDecodeHtml(BinarioSeguimiento), Columnas_HTML, [RowSelector="tr"]),
                 ItemsPrepared = Table.Buffer(FnPrepareTableWithHeader(OrigenItems)),
 
                 ItemsColNames     = Table.ColumnNames(ItemsPrepared),
@@ -343,7 +360,7 @@ let
                     in baseTxt, type text),
 
                 OrigenAPU_Raw = try Excel.Workbook(BinarioPresupuesto, null, true){0}[Data]
-                                otherwise Html.Table(Text.FromBinary(BinarioPresupuesto, 65001), Columnas_APU, [RowSelector="tr"]),
+                                otherwise Html.Table(FnDecodeHtml(BinarioPresupuesto), Columnas_APU, [RowSelector="tr"]),
                 OrigenAPU_Cols = Table.SelectColumns(OrigenAPU_Raw, List.FirstN(Table.ColumnNames(OrigenAPU_Raw), 3)),
                 OrigenAPU = Table.RenameColumns(OrigenAPU_Cols, List.Zip({Table.ColumnNames(OrigenAPU_Cols), {"Columna 1", "Columna 2", "Columna 3"}})),
 
@@ -545,7 +562,7 @@ let
                     let t = FnText(v), afterDash = if Text.Contains(t, "-") then Text.Trim(Text.AfterDelimiter(t, "-")) else t, clean = FnCleanDisplay(afterDash)
                     in clean,
                 Columnas = FnBuildColumnas(13),
-                Raw = Table.Buffer(Html.Table(Text.FromBinary(Binary.Buffer(BinSalidas), 28591), Columnas, [RowSelector="tr"])),
+                Raw = Table.Buffer(Html.Table(FnDecodeHtml(BinSalidas), Columnas, [RowSelector="tr"])),
                 AddStd = Table.AddColumn(Raw, "Std", each
                     let
                         salidaNo = FnText(Record.Field(_, "Columna 2")),
@@ -601,7 +618,7 @@ let
                     let t = FnText(v), afterDash = if Text.Contains(t, "-") then Text.Trim(Text.AfterDelimiter(t, "-")) else t, clean = FnCleanDisplay(afterDash)
                     in clean,
                 Columnas = FnBuildColumnas(14),
-                Raw = Table.Buffer(Html.Table(Text.FromBinary(Binary.Buffer(BinEntradas), 28591), Columnas, [RowSelector="tr"])),
+                Raw = Table.Buffer(Html.Table(FnDecodeHtml(BinEntradas), Columnas, [RowSelector="tr"])),
                 AddStd = Table.AddColumn(Raw, "Std", each
                     let
                         codigoIns = FnText(Record.Field(_, "Columna 2")),

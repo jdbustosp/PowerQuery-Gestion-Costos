@@ -3,6 +3,7 @@ let
     ParamProyecto = Text.Trim(ProyectoActual),
     FechaVersion = try Text.Trim(Text.From(FechaVersionSINCO)) otherwise "",
     FnEncode = F_Globales[FnEncode],
+    FnDecodeHtml = F_Globales[FnDecodeHtml],
     FnReadSPBinary = F_Globales[FnReadSPBinary],
     FxToNumberFlex = F_Globales[FxToNumberFlex],
     Columnas = F_Globales[FnBuildColumnas](15),
@@ -35,7 +36,7 @@ let
 
     FnTable = (bin as binary) as table =>
         try Excel.Workbook(Binary.Buffer(bin), null, true){0}[Data]
-        otherwise Html.Table(Text.FromBinary(Binary.Buffer(bin), 28591), Columnas, [RowSelector="tr"]),
+        otherwise Html.Table(FnDecodeHtml(bin), Columnas, [RowSelector="tr"]),
     FnRename = (tbl as table) as table => Table.RenameColumns(tbl, List.Zip({Table.ColumnNames(tbl), List.Transform({1..List.Count(Table.ColumnNames(tbl))}, each "Columna" & Text.From(_))})),
     Actual = Table.SelectRows(COMPRAS, each [#"#SALIDA"] <> null and FnDigits([#"#SALIDA"]) <> null),
     ActualKey = Table.AddColumn(Actual, "__Key", each [Centro de Costos] & "|" & FnDigits([#"#SALIDA"]), type text),
@@ -43,7 +44,7 @@ let
     FnKeysPrevCC = (cc as text) as table =>
         let
             bin = FnPick(cc, "MASIVO SALIDAS"),
-            tbl0 = if bin = null then #table({"Columna1","Columna2","Columna3"}, {}) else FnRename(Html.Table(Text.FromBinary(Binary.Buffer(bin), 28591), Columnas, [RowSelector="tr"])),
+            tbl0 = if bin = null then #table({"Columna1","Columna2","Columna3"}, {}) else FnRename(Html.Table(FnDecodeHtml(bin), Columnas, [RowSelector="tr"])),
             rows = Table.SelectRows(tbl0, each FnText([Columna1]) <> "" and FnDigits([Columna2]) <> null and FnText([Columna3]) <> "" and (try Date.From([Columna1]) otherwise null) <> null),
             keys = Table.AddColumn(rows, "__Key", each cc & "|" & FnDigits([Columna2]), type text),
             out = Table.SelectColumns(keys, {"__Key"})
