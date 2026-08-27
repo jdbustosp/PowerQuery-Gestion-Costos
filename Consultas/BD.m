@@ -242,7 +242,11 @@ let
         "Valor Total ppto (CC)", "VT Cortes", "Valor descuento",
         "Cantidad CC Cons", "V/U CC cons", "VT CC cons",
         "VR_Bruto_con_desc", "No_Prov", "Nombre Contratista",
-        "VT Asegurada", "VT Proyectado Colsubsidio"
+        "VT Asegurada", "VT Proyectado Colsubsidio",
+        // Agregadas 2026-08-27: las calcula AddCantAseg/AddVUAseg mas arriba pero se
+        // perdian aqui en el recorte final. Las necesita SINCO.m (Bosque de Turpial)
+        // para armar Cantidad/V.U. asegurada = Cantidad y VT Contratado + Comprado.
+        "Cantidad asegurada", "V/U asegurada"
     },
     FinalRecortada = Table.SelectColumns(FinalOCLimpia, ColumnasFinalesArboleda, MissingField.UseNull),
 
