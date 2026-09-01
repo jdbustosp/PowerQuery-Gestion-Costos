@@ -11,6 +11,7 @@ let
     // ============================================================
     FxToNumberFlex = F_Globales[FxToNumberFlex],
     FnCleanText = F_Globales[FnCleanText],
+    FnNormalizeSpaces = F_Globales[FnNormalizeSpaces],
     FnReadSPBinary = F_Globales[FnReadSPBinary],
     FnEncode = F_Globales[FnEncode],
 
@@ -90,9 +91,9 @@ let
         {"Capitulo", each if _ = null then null else Text.Trim(Text.From(_)), type text},
         {"Actividad", each if _ = null then null else Text.Trim(Text.From(_)), type text},
         {"Ins", each if _ = null then null else Text.Trim(Text.From(_)), type text},
-        {"# CC - Comparativo", each if _ = null then null else Text.Trim(Text.From(_)), type text},
-        {"# CC", each if _ = null then null else Text.Trim(Text.From(_)), type text},
-        {"Comparativo", each if _ = null then null else Text.Trim(Text.From(_)), type text},
+        {"# CC - Comparativo", each FnNormalizeSpaces(_), type text},
+        {"# CC", each FnNormalizeSpaces(_), type text},
+        {"Comparativo", each FnNormalizeSpaces(_), type text},
 
         {"Cantidad ppto (CC)", each FxToNumberFlex(_), type number},
         {"V/U ppto (CC)", each FxToNumberFlex(_), type number},

@@ -3,6 +3,7 @@ let
     // 1. FUNCIONES DE LIMPIEZA (Centralizadas desde F_Globales)
     // ============================================================
     FnCleanText = F_Globales[FnCleanText],
+    FnNormalizeSpaces = F_Globales[FnNormalizeSpaces],
     FnRemoveAccentsSymbols = F_Globales[FnRemoveAccentsSymbols],
 
     // ============================================================
@@ -39,7 +40,7 @@ let
         {"Actividad", each FnCleanText(_), type text}, 
         {"Subcapitulo", each FnCleanText(_), type text}, 
         {"Ins", each FnCleanText(_), type text}, 
-        {"# CC - Comparativo", each FnCleanText(_), type text}, 
+        {"# CC - Comparativo", each FnCleanText(FnNormalizeSpaces(_)), type text}, 
         {"Valor Total ppto (CC)", each try Number.From(_) otherwise null, type number}, 
         {"V/U ppto (CC)", each try Number.From(_) otherwise null, type number}
     }, null, MissingField.Ignore),

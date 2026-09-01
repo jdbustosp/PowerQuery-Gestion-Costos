@@ -119,7 +119,7 @@ Los cruces entre fuentes se hacen por TEXTO, y las fuentes traen suciedad invisi
 
 | Clave de cruce | Entre quiénes | Normalización aplicada |
 |---|---|---|
-| `# CC - Comparativo` | `APROBACIONES_SP` (SharePoint) ↔ `COMPARATIVOS` (manual `Det_CC`) | `FnNormalizeSpaces`: espacios duros (NBSP) → normales, espacios dobles internos → uno, espacios alrededor de guiones eliminados (`002 - X` → `002-X`, la forma compacta de Det_CC), trim de extremos. **Aplicada en AMBOS lados** (2026-08) porque el consolidador de SharePoint traía dobles espacios que `Text.Trim` no quita y rompían el match. |
+| `# CC - Comparativo` (+ `# CC`, `Comparativo`) | `APROBACIONES_SP` (SharePoint) ↔ `COMPARATIVOS` (manual `Det_CC`) ↔ `DESCARGAS`/`DISPONIBLE` (adjudicados del ppto) | `FnNormalizeSpaces`: espacios duros (NBSP) → normales, espacios dobles internos → uno, espacios alrededor de guiones eliminados (`002 - X` → `002-X`, la forma compacta de Det_CC), trim de extremos. **Aplicada en AMBOS lados** (2026-08) porque el consolidador de SharePoint traía dobles espacios que `Text.Trim` no quita y rompían el match. |
 | `# OC / Contrato` | `SINCO` ↔ `COMPARATIVOS` (excluir OCs ya comparados) | `Text.Trim` |
 | `Codigo act` (código de actividad) | seguimiento ↔ ppto | `FnFormatCodigoAct` + limpieza NBSP (ver comentario en `F_Globales`) |
 | `Ins` (insumo) | compras/contratos ↔ ítems | `FnClaveLimpia` (mayúsculas, sin tildes/símbolos) |

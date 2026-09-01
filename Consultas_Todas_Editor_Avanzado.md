@@ -985,6 +985,7 @@ let
     // ============================================================
     FxToNumberFlex = F_Globales[FxToNumberFlex],
     FnCleanText = F_Globales[FnCleanText],
+    FnNormalizeSpaces = F_Globales[FnNormalizeSpaces],
     FnReadSPBinary = F_Globales[FnReadSPBinary],
     FnEncode = F_Globales[FnEncode],
 
@@ -1064,9 +1065,9 @@ let
         {"Capitulo", each if _ = null then null else Text.Trim(Text.From(_)), type text},
         {"Actividad", each if _ = null then null else Text.Trim(Text.From(_)), type text},
         {"Ins", each if _ = null then null else Text.Trim(Text.From(_)), type text},
-        {"# CC - Comparativo", each if _ = null then null else Text.Trim(Text.From(_)), type text},
-        {"# CC", each if _ = null then null else Text.Trim(Text.From(_)), type text},
-        {"Comparativo", each if _ = null then null else Text.Trim(Text.From(_)), type text},
+        {"# CC - Comparativo", each FnNormalizeSpaces(_), type text},
+        {"# CC", each FnNormalizeSpaces(_), type text},
+        {"Comparativo", each FnNormalizeSpaces(_), type text},
 
         {"Cantidad ppto (CC)", each FxToNumberFlex(_), type number},
         {"V/U ppto (CC)", each FxToNumberFlex(_), type number},
@@ -1239,6 +1240,7 @@ let
     // 1. FUNCIONES DE LIMPIEZA (Centralizadas desde F_Globales)
     // ============================================================
     FnCleanText = F_Globales[FnCleanText],
+    FnNormalizeSpaces = F_Globales[FnNormalizeSpaces],
     FnRemoveAccentsSymbols = F_Globales[FnRemoveAccentsSymbols],
 
     // ============================================================
@@ -1275,7 +1277,7 @@ let
         {"Actividad", each FnCleanText(_), type text}, 
         {"Subcapitulo", each FnCleanText(_), type text}, 
         {"Ins", each FnCleanText(_), type text}, 
-        {"# CC - Comparativo", each FnCleanText(_), type text}, 
+        {"# CC - Comparativo", each FnCleanText(FnNormalizeSpaces(_)), type text}, 
         {"Valor Total ppto (CC)", each try Number.From(_) otherwise null, type number}, 
         {"V/U ppto (CC)", each try Number.From(_) otherwise null, type number}
     }, null, MissingField.Ignore),
