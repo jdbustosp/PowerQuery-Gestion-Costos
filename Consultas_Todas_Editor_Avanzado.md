@@ -101,6 +101,7 @@ let
     )
 in
     TablaFinal
+
 ```
 
 ## BD
@@ -290,11 +291,35 @@ let
         "__AA", {"vtAsegAct"}),
     AplicarProyeccion = Table.AddColumn(ConAsegActividad, "VT Proyectado Colsubsidio", each
         if [Tipo] = "POR ADJUDICAR" then (if ToNumber0([vtAsegAct]) > 0 then 0 else [#"Valor Total ppto (CC)"])
+        // ADJUDICADO = descargado con comparativo aprobado pero SIN contrato/OC en
+        // SINCO todavia: proyecta el valor adjudicado. Cuando el contrato ya se monta
+        // en SINCO (asegurado > 0 en la actividad), pasa a 0 y cuenta el asegurado.
+        else if [Tipo] = "ADJUDICADO" then (if ToNumber0([vtAsegAct]) > 0 then 0 else [#"Valor Total ppto (CC)"])
         else if [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS" then (if [VT Asegurada] <> 0 then [VT Asegurada] else null)
         else null,
     type number),
 
-    FinalClean = Table.RemoveColumns(AplicarProyeccion, ColsBanderas & {"vtAsegAct"}, MissingField.Ignore),
+    // Relleno de Subcapitulo (2026-09-04): filas COMPRAS/CONTRATO/CC/CC CONSOLIDADO/
+    // PROVISIONES llegan sin Subcapitulo aunque su actividad SI lo tiene en el
+    // ppto/seguimiento. Se propaga por (Centro de Costos + Codigo act) desde las filas
+    // que si lo traen. Regla del usuario: lo del capitulo 31 es URBANISMO SAN AGUSTIN.
+    EsSubcapVacio = (v as any) as logical =>
+        (try Text.Trim(Text.From(v)) otherwise "") = "",
+    SubcapPorActividad = Table.Buffer(Table.Group(
+        Table.SelectRows(AplicarProyeccion, each (not EsSubcapVacio([Subcapitulo])) and (try Text.Trim(Text.From([Codigo act])) otherwise "") <> ""),
+        {"Centro de Costos", "Codigo act"},
+        {{"subcapAct", each List.First(List.RemoveNulls([Subcapitulo])), type text}})),
+    ConSubcapProp0 = Table.ExpandTableColumn(
+        Table.NestedJoin(AplicarProyeccion, {"Centro de Costos", "Codigo act"}, SubcapPorActividad, {"Centro de Costos", "Codigo act"}, "__SP", JoinKind.LeftOuter),
+        "__SP", {"subcapAct"}),
+    ConSubcapProp = Table.RemoveColumns(Table.AddColumn(ConSubcapProp0, "SubcapRelleno", each
+        if not EsSubcapVacio([Subcapitulo]) then [Subcapitulo]
+        else if not EsSubcapVacio([subcapAct]) then [subcapAct]
+        else if Text.Contains(Text.Upper(try Text.From([Capitulo]) otherwise ""), "SAN AGUSTIN") then "URBANISMO SAN AGUSTIN"
+        else [Subcapitulo], type text), {"Subcapitulo", "subcapAct"}),
+    ConSubcapFinal = Table.RenameColumns(ConSubcapProp, {{"SubcapRelleno", "Subcapitulo"}}),
+
+    FinalClean = Table.RemoveColumns(ConSubcapFinal, ColsBanderas & {"vtAsegAct"}, MissingField.Ignore),
     FinalSinErrores = Table.ReplaceErrorValues(FinalClean, List.Transform(Table.ColumnNames(FinalClean), each {_, null})),
 
     // Campo para tablas dinamicas: relaciona No_Prov solo por OC normalizada.
@@ -370,6 +395,7 @@ let
     TablaMaestraFinal = Table.Buffer(FinalRecortada)
 in
     TablaMaestraFinal
+
 ```
 
 ## COMPARATIVOS
@@ -437,6 +463,7 @@ let
          "Codigo act", "Tipo"}, MissingField.Ignore)
 in
     TablaFinal
+
 ```
 
 ## COMPRAS
@@ -837,6 +864,7 @@ let
     TablaFinal = TypedFinal
 in
     TablaFinal
+
 ```
 
 ## CONTRATOS
@@ -976,6 +1004,7 @@ let
     TablaFinal = FilteredZeros
 in
     TablaFinal
+
 ```
 
 ## DESCARGAS
@@ -1089,6 +1118,7 @@ let
     Resultado = Table.Buffer(TablaFinal)
 in
     Resultado
+
 ```
 
 ## DESCUENTOS
@@ -1194,6 +1224,7 @@ let
     TablaFinal = FilteredZeros
 in
     TablaFinal
+
 ```
 
 ## DIAGNOSTICO
@@ -1239,6 +1270,7 @@ let
     Resultado = Table.FromRecords(Filas)
 in
     Resultado
+
 ```
 
 ## DISPONIBLE
@@ -1332,16 +1364,21 @@ let
     DetCC_WithFinalIns = Table.AddColumn(DetCC_WithFinalIns1, "Subcap_Final", each if [Act_Oficial] <> null then [Subcap_Oficial] else [SubcapClave], type text),
 
     DetCC_WithCantidad = Table.AddColumn(DetCC_WithFinalIns, "Cantidad_Calc", each let total = [#"Valor Total ppto (CC)"], unit = [#"V/U ppto (CC)"] in if unit <> null and unit <> 0 then total / unit else null, type number),
-    DetCC_ReportShape0 = Table.SelectColumns(DetCC_WithCantidad, {"Centro de Costos", "Codigo act", "Capitulo", "Act_Final", "Subcap_Final", "Ins_Final", "# CC - Comparativo", "Valor Total ppto (CC)", "V/U ppto (CC)", "Cantidad_Calc"}, MissingField.Ignore),
-    DetCC_FinalAdjudicados_Renamed = Table.RenameColumns(DetCC_ReportShape0, {{"Ins_Final", "Ins"}, {"Act_Final", "Actividad"}, {"Subcap_Final", "Subcapitulo"}}),
-    DetCC_FinalAdjudicados = Table.AddColumn(DetCC_FinalAdjudicados_Renamed, "Tipo", each "Adjudicado", type text),
+    // El Ins ORIGINAL de descargas se conserva para MOSTRAR (el usuario quiere ver el
+    // nombre tal como lo descargo, con el subcapitulo embebido); el Ins oficial adoptado
+    // (Ins_Cruce) se usa SOLO como clave interna del Cruce 2 y no sale en el resultado.
+    DetCC_ReportShape0 = Table.SelectColumns(DetCC_WithCantidad, {"Centro de Costos", "Codigo act", "Capitulo", "Act_Final", "Subcap_Final", "Ins", "Ins_Final", "# CC - Comparativo", "Valor Total ppto (CC)", "V/U ppto (CC)", "Cantidad_Calc"}, MissingField.Ignore),
+    DetCC_FinalAdjudicados_Renamed = Table.RenameColumns(DetCC_ReportShape0, {{"Ins_Final", "Ins_Cruce"}, {"Act_Final", "Actividad"}, {"Subcap_Final", "Subcapitulo"}}),
+    DetCC_FinalAdjudicados_ConCruce = Table.AddColumn(DetCC_FinalAdjudicados_Renamed, "Tipo", each "Adjudicado", type text),
+    DetCC_FinalAdjudicados = Table.RemoveColumns(DetCC_FinalAdjudicados_ConCruce, {"Ins_Cruce"}),
 
     // ============================================================
     // 6. CRUCE 2: Restar lo adjudicado al PPTO para hallar Saldo
+    // (agrupa por Ins_Cruce, el nombre oficial del ppto, para que la resta coincida)
     // ============================================================
-    Adj_Grouped_Buffer = Table.Buffer(Table.Group(DetCC_FinalAdjudicados, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "Ins"}, {{"ValorAdjudicado_Bloque", each List.Sum([#"Valor Total ppto (CC)"]), type number}, {"CantAdjudicada_Bloque", each List.Sum([Cantidad_Calc]), type number}})),
+    Adj_Grouped_Buffer = Table.Buffer(Table.Group(DetCC_FinalAdjudicados_ConCruce, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "Ins_Cruce"}, {{"ValorAdjudicado_Bloque", each List.Sum([#"Valor Total ppto (CC)"]), type number}, {"CantAdjudicada_Bloque", each List.Sum([Cantidad_Calc]), type number}})),
 
-    Bloques_Merge = Table.NestedJoin(PPTO_Grouped_Buffer, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "Ins_Oficial"}, Adj_Grouped_Buffer, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "Ins"}, "AdjTot", JoinKind.LeftOuter),
+    Bloques_Merge = Table.NestedJoin(PPTO_Grouped_Buffer, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "Ins_Oficial"}, Adj_Grouped_Buffer, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "Ins_Cruce"}, "AdjTot", JoinKind.LeftOuter),
     Bloques_ExpandedAdj = Table.ExpandTableColumn(Bloques_Merge, "AdjTot", {"ValorAdjudicado_Bloque", "CantAdjudicada_Bloque"}, {"ValorAdjudicado_Bloque", "CantAdjudicada_Bloque"}),
     Bloques_Filled = Table.TransformColumns(Bloques_ExpandedAdj, {{"ValorTotal_PPTO_Bloque", each if _ = null then 0 else _, type number}, {"Unitario_PPTO_Bloque", each if _ = null then 0 else _, type number}, {"ValorAdjudicado_Bloque", each if _ = null then 0 else _, type number}, {"CantAdjudicada_Bloque", each if _ = null then 0 else _, type number}}),
     
@@ -1387,6 +1424,7 @@ let
     TablaFinal = Final_Ordered
 in
     TablaFinal
+
 ```
 
 ## F_Globales
@@ -2204,6 +2242,7 @@ let
     ]
 in
     Funciones
+
 ```
 
 ## ITEMSINSUMOS
@@ -2219,6 +2258,7 @@ let
     TablaEnMemoria = Table.Buffer(Typed)
 in 
     TablaEnMemoria
+
 ```
 
 ## PPTO_BD
@@ -2244,6 +2284,7 @@ let
     TablaEnMemoria = Table.Buffer(Typed)
 in 
     TablaEnMemoria
+
 ```
 
 ## PROVISIONES_SP
@@ -2320,6 +2361,7 @@ let
     , type text)
 in
     AgregadoCC
+
 ```
 
 ## SINCO
@@ -2476,6 +2518,7 @@ let
     Final = Table.Buffer(Renamed)
 in
     Final
+
 ```
 
 ## SP_Seguimiento_Parsed
@@ -2519,4 +2562,5 @@ let
     Resultado = Table.Buffer(TiposFinales)
 in
     Resultado
+
 ```

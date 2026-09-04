@@ -86,16 +86,21 @@ let
     DetCC_WithFinalIns = Table.AddColumn(DetCC_WithFinalIns1, "Subcap_Final", each if [Act_Oficial] <> null then [Subcap_Oficial] else [SubcapClave], type text),
 
     DetCC_WithCantidad = Table.AddColumn(DetCC_WithFinalIns, "Cantidad_Calc", each let total = [#"Valor Total ppto (CC)"], unit = [#"V/U ppto (CC)"] in if unit <> null and unit <> 0 then total / unit else null, type number),
-    DetCC_ReportShape0 = Table.SelectColumns(DetCC_WithCantidad, {"Centro de Costos", "Codigo act", "Capitulo", "Act_Final", "Subcap_Final", "Ins_Final", "# CC - Comparativo", "Valor Total ppto (CC)", "V/U ppto (CC)", "Cantidad_Calc"}, MissingField.Ignore),
-    DetCC_FinalAdjudicados_Renamed = Table.RenameColumns(DetCC_ReportShape0, {{"Ins_Final", "Ins"}, {"Act_Final", "Actividad"}, {"Subcap_Final", "Subcapitulo"}}),
-    DetCC_FinalAdjudicados = Table.AddColumn(DetCC_FinalAdjudicados_Renamed, "Tipo", each "Adjudicado", type text),
+    // El Ins ORIGINAL de descargas se conserva para MOSTRAR (el usuario quiere ver el
+    // nombre tal como lo descargo, con el subcapitulo embebido); el Ins oficial adoptado
+    // (Ins_Cruce) se usa SOLO como clave interna del Cruce 2 y no sale en el resultado.
+    DetCC_ReportShape0 = Table.SelectColumns(DetCC_WithCantidad, {"Centro de Costos", "Codigo act", "Capitulo", "Act_Final", "Subcap_Final", "Ins", "Ins_Final", "# CC - Comparativo", "Valor Total ppto (CC)", "V/U ppto (CC)", "Cantidad_Calc"}, MissingField.Ignore),
+    DetCC_FinalAdjudicados_Renamed = Table.RenameColumns(DetCC_ReportShape0, {{"Ins_Final", "Ins_Cruce"}, {"Act_Final", "Actividad"}, {"Subcap_Final", "Subcapitulo"}}),
+    DetCC_FinalAdjudicados_ConCruce = Table.AddColumn(DetCC_FinalAdjudicados_Renamed, "Tipo", each "Adjudicado", type text),
+    DetCC_FinalAdjudicados = Table.RemoveColumns(DetCC_FinalAdjudicados_ConCruce, {"Ins_Cruce"}),
 
     // ============================================================
     // 6. CRUCE 2: Restar lo adjudicado al PPTO para hallar Saldo
+    // (agrupa por Ins_Cruce, el nombre oficial del ppto, para que la resta coincida)
     // ============================================================
-    Adj_Grouped_Buffer = Table.Buffer(Table.Group(DetCC_FinalAdjudicados, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "Ins"}, {{"ValorAdjudicado_Bloque", each List.Sum([#"Valor Total ppto (CC)"]), type number}, {"CantAdjudicada_Bloque", each List.Sum([Cantidad_Calc]), type number}})),
+    Adj_Grouped_Buffer = Table.Buffer(Table.Group(DetCC_FinalAdjudicados_ConCruce, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "Ins_Cruce"}, {{"ValorAdjudicado_Bloque", each List.Sum([#"Valor Total ppto (CC)"]), type number}, {"CantAdjudicada_Bloque", each List.Sum([Cantidad_Calc]), type number}})),
 
-    Bloques_Merge = Table.NestedJoin(PPTO_Grouped_Buffer, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "Ins_Oficial"}, Adj_Grouped_Buffer, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "Ins"}, "AdjTot", JoinKind.LeftOuter),
+    Bloques_Merge = Table.NestedJoin(PPTO_Grouped_Buffer, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "Ins_Oficial"}, Adj_Grouped_Buffer, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "Ins_Cruce"}, "AdjTot", JoinKind.LeftOuter),
     Bloques_ExpandedAdj = Table.ExpandTableColumn(Bloques_Merge, "AdjTot", {"ValorAdjudicado_Bloque", "CantAdjudicada_Bloque"}, {"ValorAdjudicado_Bloque", "CantAdjudicada_Bloque"}),
     Bloques_Filled = Table.TransformColumns(Bloques_ExpandedAdj, {{"ValorTotal_PPTO_Bloque", each if _ = null then 0 else _, type number}, {"Unitario_PPTO_Bloque", each if _ = null then 0 else _, type number}, {"ValorAdjudicado_Bloque", each if _ = null then 0 else _, type number}, {"CantAdjudicada_Bloque", each if _ = null then 0 else _, type number}}),
     

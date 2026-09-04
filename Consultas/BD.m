@@ -182,11 +182,35 @@ let
         "__AA", {"vtAsegAct"}),
     AplicarProyeccion = Table.AddColumn(ConAsegActividad, "VT Proyectado Colsubsidio", each
         if [Tipo] = "POR ADJUDICAR" then (if ToNumber0([vtAsegAct]) > 0 then 0 else [#"Valor Total ppto (CC)"])
+        // ADJUDICADO = descargado con comparativo aprobado pero SIN contrato/OC en
+        // SINCO todavia: proyecta el valor adjudicado. Cuando el contrato ya se monta
+        // en SINCO (asegurado > 0 en la actividad), pasa a 0 y cuenta el asegurado.
+        else if [Tipo] = "ADJUDICADO" then (if ToNumber0([vtAsegAct]) > 0 then 0 else [#"Valor Total ppto (CC)"])
         else if [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS" then (if [VT Asegurada] <> 0 then [VT Asegurada] else null)
         else null,
     type number),
 
-    FinalClean = Table.RemoveColumns(AplicarProyeccion, ColsBanderas & {"vtAsegAct"}, MissingField.Ignore),
+    // Relleno de Subcapitulo (2026-09-04): filas COMPRAS/CONTRATO/CC/CC CONSOLIDADO/
+    // PROVISIONES llegan sin Subcapitulo aunque su actividad SI lo tiene en el
+    // ppto/seguimiento. Se propaga por (Centro de Costos + Codigo act) desde las filas
+    // que si lo traen. Regla del usuario: lo del capitulo 31 es URBANISMO SAN AGUSTIN.
+    EsSubcapVacio = (v as any) as logical =>
+        (try Text.Trim(Text.From(v)) otherwise "") = "",
+    SubcapPorActividad = Table.Buffer(Table.Group(
+        Table.SelectRows(AplicarProyeccion, each (not EsSubcapVacio([Subcapitulo])) and (try Text.Trim(Text.From([Codigo act])) otherwise "") <> ""),
+        {"Centro de Costos", "Codigo act"},
+        {{"subcapAct", each List.First(List.RemoveNulls([Subcapitulo])), type text}})),
+    ConSubcapProp0 = Table.ExpandTableColumn(
+        Table.NestedJoin(AplicarProyeccion, {"Centro de Costos", "Codigo act"}, SubcapPorActividad, {"Centro de Costos", "Codigo act"}, "__SP", JoinKind.LeftOuter),
+        "__SP", {"subcapAct"}),
+    ConSubcapProp = Table.RemoveColumns(Table.AddColumn(ConSubcapProp0, "SubcapRelleno", each
+        if not EsSubcapVacio([Subcapitulo]) then [Subcapitulo]
+        else if not EsSubcapVacio([subcapAct]) then [subcapAct]
+        else if Text.Contains(Text.Upper(try Text.From([Capitulo]) otherwise ""), "SAN AGUSTIN") then "URBANISMO SAN AGUSTIN"
+        else [Subcapitulo], type text), {"Subcapitulo", "subcapAct"}),
+    ConSubcapFinal = Table.RenameColumns(ConSubcapProp, {{"SubcapRelleno", "Subcapitulo"}}),
+
+    FinalClean = Table.RemoveColumns(ConSubcapFinal, ColsBanderas & {"vtAsegAct"}, MissingField.Ignore),
     FinalSinErrores = Table.ReplaceErrorValues(FinalClean, List.Transform(Table.ColumnNames(FinalClean), each {_, null})),
 
     // Campo para tablas dinamicas: relaciona No_Prov solo por OC normalizada.
