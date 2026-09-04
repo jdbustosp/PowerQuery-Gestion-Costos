@@ -166,14 +166,14 @@ let
     BaseConBanderas = Table.ExpandTableColumn(CruceConBase, "B", ColsBanderas),
     BaseConBanderasSafe = Table.ReplaceValue(BaseConBanderas, null, false, Replacer.ReplaceValue, ColsBanderas),
 
-    // LA REGLA DE APLICACION: Orden de prioridad estricto
-    AplicarProyeccion = Table.AddColumn(BaseConBanderasSafe, "VT Proyectado Colsubsidio", each
+    // REGLA SIMPLE (2026-09-02, definida por el usuario): la Proyeccion Colsubsidio es
+    // lo asegurado (contratos + ordenes de compra) mas el presupuesto de lo que falta
+    // por adjudicar. Sin escenarios: el "motor" de banderas de arriba quedo sin uso
+    // (M es perezoso: al no referenciarse, no se evalua) y puede retirarse en una
+    // limpieza futura.
+    AplicarProyeccion = Table.AddColumn(AddVUAseg, "VT Proyectado Colsubsidio", each
         if [Tipo] = "POR ADJUDICAR" then [#"Valor Total ppto (CC)"]
-        else if [Esc4] = true then [VT Consumido]
-        else if [Esc5] = true then 0
-        else if [Esc1] = true then [VR total aprobacion]
-        else if [Esc3] = true then [VT Proyectado]
-        else if [Esc2] = true then (if [VT Asegurada] <> 0 then [VT Asegurada] else null)
+        else if [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS" then (if [VT Asegurada] <> 0 then [VT Asegurada] else null)
         else null,
     type number),
 

@@ -491,6 +491,36 @@ let
                 // subcapitulo como sufijo tras el ultimo " - " ("1.01 - COMISION ... - GENERALES").
                 // Se toma la cola despues del ULTIMO " - " como subcapitulo; el recorte del
                 // nombre lo hace la logica ya existente en ItemsWithActividad (patron conGuion).
+                // Sufijos de "frente"/especialidad que el reporte agrega DESPUES del
+                // subcapitulo real ("... - CUARTO DE BASURAS - ELECTRICO"): NO son
+                // subcapitulos (confirmado con el usuario 2026-09-02). Si la cola
+                // extraida es uno de estos, se descarta y se re-extrae de lo anterior.
+                SubcapSufijosIgnorados = {"ELECTRICO"},
+                EsSufijoIgnorado = (t as text) as logical =>
+                    List.Contains(SubcapSufijosIgnorados, Text.Upper(FnRemoveAccentsSymbols(t))),
+
+                // Extrae la cola tras el ultimo " - " (limpiando el guion suelto final que
+                // suele traer el reporte), saltando sufijos ignorados de forma recursiva.
+                FnExtraerSubcapDeTexto = (txt as text) as nullable text =>
+                    let
+                        pos    = Text.PositionOf(txt, " - ", Occurrence.Last),
+                        cola   = if pos < 0 then "" else FnQuitarGuionColgante(Text.Trim(Text.Range(txt, pos + 3))),
+                        cabeza = if pos < 0 then "" else Text.Trim(Text.Range(txt, 0, pos)),
+                        valida = cola <> "" and cabeza <> "" and Text.Length(cola) <= 60
+                    in
+                        if not valida then null
+                        else if EsSufijoIgnorado(cola) then @FnExtraerSubcapDeTexto(cabeza)
+                        else cola,
+
+                // Quita del final de un nombre los sufijos ignorados (" - ELECTRICO"),
+                // para que tampoco queden pegados al nombre de la actividad.
+                FnQuitarSufijosIgnorados = (txt as text) as text =>
+                    let
+                        pos    = Text.PositionOf(txt, " - ", Occurrence.Last),
+                        cola   = if pos < 0 then "" else FnQuitarGuionColgante(Text.Trim(Text.Range(txt, pos + 3))),
+                        cabeza = if pos < 0 then "" else Text.Trim(Text.Range(txt, 0, pos))
+                    in if pos >= 0 and cola <> "" and EsSufijoIgnorado(cola) then @FnQuitarSufijosIgnorados(cabeza) else txt,
+
                 ItemsConSubcapDerivado = Table.AddColumn(ItemsExpandedAPU, "SubcapDerivado", each
                     let
                         subcapSeg = if [Subcapitulo] = null then "" else Text.Trim(Text.From([Subcapitulo])),
@@ -499,14 +529,16 @@ let
                         descTxt   = Text.Combine(List.Select(Text.Split(descRaw, " "), each _ <> ""), " "),
                         apuRaw    = Text.Trim(Text.Replace(Text.From(if [NombreActAPU] = null then "" else [NombreActAPU]), "#(00A0)", " ")),
                         apuTxt    = Text.Combine(List.Select(Text.Split(apuRaw, " "), each _ <> ""), " "),
-                        base      = if descTxt <> "" then descTxt else apuTxt,
-                        pos       = if (not aplica) or base = "" then -1 else Text.PositionOf(base, " - ", Occurrence.Last),
-                        // El reporte suele traer un guion suelto colgando al final del texto
-                        // ("... - GENERALES -"); se limpia con la misma funcion que usa el nombre.
-                        cola      = if pos < 0 then "" else FnQuitarGuionColgante(Text.Trim(Text.Range(base, pos + 3))),
-                        cabeza    = if pos < 0 then "" else Text.Trim(Text.Range(base, 0, pos)),
-                        valida    = cola <> "" and cabeza <> "" and Text.Length(cola) <= 60
-                    in if valida then cola else null, type text),
+                        desdeDesc = if (not aplica) or descTxt = "" then null else FnExtraerSubcapDeTexto(descTxt),
+                        // Un "(" sin ")" en la cola delata texto TRUNCADO por el reporte
+                        // ("APTOS (U" en vez de "...APTOS (Un) - TORRES"): en ese caso se
+                        // intenta con el nombre del APU (otro reporte, normalmente completo).
+                        truncado  = desdeDesc <> null and Text.Contains(desdeDesc, "(") and not Text.Contains(desdeDesc, ")"),
+                        desdeApu  = if (not aplica) or apuTxt = "" then null else FnExtraerSubcapDeTexto(apuTxt),
+                        elegido   = if not aplica then null
+                                    else if desdeDesc = null or truncado then desdeApu
+                                    else desdeDesc
+                    in elegido, type text),
 
                 // Canonicaliza subcapitulos derivados TRUNCADOS por el reporte (SINCO corta
                 // el texto en algunas filas: "ELE", "ELEC", "ELECTRIC" en vez de "ELECTRICO";
@@ -544,9 +576,11 @@ let
                         descSegRaw    = Text.Trim(Text.Replace(Text.From(if [DescActRaw] = null then "" else [DescActRaw]), "#(00A0)", " ")),
                         descSegTxt    = Text.Combine(List.Select(Text.Split(descSegRaw, " "), each _ <> ""), " "),
                         nombreExtraido= Text.Trim(Text.From(if [NombreActAPU] = null then "" else [NombreActAPU])),
-                        nombreReal    = if descSegTxt <> "" then descSegTxt
+                        nombreReal0   = if descSegTxt <> "" then descSegTxt
                                         else if nombreExtraido <> "" then nombreExtraido
                                         else "Actividad " & codTxt,
+                        // Los sufijos ignorados ("- ELECTRICO") tampoco van en el nombre.
+                        nombreReal    = FnQuitarSufijosIgnorados(nombreReal0),
                         // Subcapitulo normalizado igual que la descripcion (NBSP->espacio,
                         // espacios colapsados) para que la busqueda de mas abajo no falle por
                         // una diferencia de espacios/caracteres invisibles entre los 2 campos
