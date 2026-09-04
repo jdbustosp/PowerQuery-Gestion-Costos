@@ -299,27 +299,7 @@ let
         else null,
     type number),
 
-    // Relleno de Subcapitulo (2026-09-04): filas COMPRAS/CONTRATO/CC/CC CONSOLIDADO/
-    // PROVISIONES llegan sin Subcapitulo aunque su actividad SI lo tiene en el
-    // ppto/seguimiento. Se propaga por (Centro de Costos + Codigo act) desde las filas
-    // que si lo traen. Regla del usuario: lo del capitulo 31 es URBANISMO SAN AGUSTIN.
-    EsSubcapVacio = (v as any) as logical =>
-        (try Text.Trim(Text.From(v)) otherwise "") = "",
-    SubcapPorActividad = Table.Buffer(Table.Group(
-        Table.SelectRows(AplicarProyeccion, each (not EsSubcapVacio([Subcapitulo])) and (try Text.Trim(Text.From([Codigo act])) otherwise "") <> ""),
-        {"Centro de Costos", "Codigo act"},
-        {{"subcapAct", each List.First(List.RemoveNulls([Subcapitulo])), type text}})),
-    ConSubcapProp0 = Table.ExpandTableColumn(
-        Table.NestedJoin(AplicarProyeccion, {"Centro de Costos", "Codigo act"}, SubcapPorActividad, {"Centro de Costos", "Codigo act"}, "__SP", JoinKind.LeftOuter),
-        "__SP", {"subcapAct"}),
-    ConSubcapProp = Table.RemoveColumns(Table.AddColumn(ConSubcapProp0, "SubcapRelleno", each
-        if not EsSubcapVacio([Subcapitulo]) then [Subcapitulo]
-        else if not EsSubcapVacio([subcapAct]) then [subcapAct]
-        else if Text.Contains(Text.Upper(try Text.From([Capitulo]) otherwise ""), "SAN AGUSTIN") then "URBANISMO SAN AGUSTIN"
-        else [Subcapitulo], type text), {"Subcapitulo", "subcapAct"}),
-    ConSubcapFinal = Table.RenameColumns(ConSubcapProp, {{"SubcapRelleno", "Subcapitulo"}}),
-
-    FinalClean = Table.RemoveColumns(ConSubcapFinal, ColsBanderas & {"vtAsegAct"}, MissingField.Ignore),
+    FinalClean = Table.RemoveColumns(AplicarProyeccion, ColsBanderas & {"vtAsegAct"}, MissingField.Ignore),
     FinalSinErrores = Table.ReplaceErrorValues(FinalClean, List.Transform(Table.ColumnNames(FinalClean), each {_, null})),
 
     // Campo para tablas dinamicas: relaciona No_Prov solo por OC normalizada.
@@ -390,7 +370,86 @@ let
         // para armar Cantidad/V.U. asegurada = Cantidad y VT Contratado + Comprado.
         "Cantidad asegurada", "V/U asegurada"
     },
-    FinalRecortada = Table.SelectColumns(FinalOCLimpia, ColumnasFinalesArboleda, MissingField.UseNull),
+    // ============================================================
+    // RELLENO DE SUBCAPITULO (2026-09-04): muchas filas (COMPRAS, CONTRATO, CC,
+    // CC CONSOLIDADO) llegan sin Subcapitulo aunque su actividad SI lo tiene en
+    // el ppto/seguimiento. Reglas, en orden:
+    //   1. Si ya tiene Subcapitulo, se respeta.
+    //   2. Capitulo o Actividad con "SAN AGUSTIN" -> URBANISMO SAN AGUSTIN
+    //      (regla del usuario: el capitulo 31 es urbanismo san agustin).
+    //   3. Propagacion por (Centro de Costos + codigo de actividad): el codigo
+    //      sale de la columna "Codigo act" o, si viene vacia (filas CC de
+    //      aprobaciones), se parsea del prefijo numerico del nombre ("1.01-...").
+    //   4. El nombre de la actividad termina con un subcapitulo ya conocido del
+    //      proyecto ("2.21-BASE GRANULAR URBANISMO INTERIOR (M3)").
+    // Filas sin actividad (COMPRAS sueltas, CC CONSOLIDADO, PROVISIONES) no se
+    // pueden clasificar y quedan en blanco.
+    // ============================================================
+    EsSubcapVacio = (v as any) as logical =>
+        (try Text.Trim(Text.From(v)) otherwise "") = "",
+    FnParseCodAct = (cod as any, act as any) as text =>
+        let c = try Text.Trim(Text.From(cod)) otherwise ""
+        in if c <> "" then c
+           else
+             let a = try Text.Trim(Text.From(act)) otherwise "",
+                 pre = if a = "" then "" else Text.Trim(Text.BeforeDelimiter(a, "-")),
+                 esCodigo = pre <> "" and Text.Remove(pre, {"0".."9", "."}) = ""
+             in if esCodigo then pre else "",
+    FnNormSubcap = (v as any) as text =>
+        try Text.Upper(FnRemoveAccentsSymbols(Text.From(v))) otherwise "",
+
+    BaseRelleno = Table.Buffer(Table.AddColumn(FinalOCLimpia, "__CodKey",
+        each FnParseCodAct([Codigo act], [Actividad]), type text)),
+
+    MapaSubcapAct = Table.Buffer(Table.Group(
+        Table.SelectRows(BaseRelleno, each (not EsSubcapVacio([Subcapitulo])) and [__CodKey] <> ""),
+        {"Centro de Costos", "__CodKey"},
+        {{"subcapAct", each List.First(List.RemoveNulls([Subcapitulo])), type text}})),
+
+    // Subcapitulos conocidos del proyecto (por CC), con su forma normalizada,
+    // ordenados del mas largo al mas corto para que gane la coincidencia mayor.
+    SubcapConocidos = Table.Buffer(Table.Group(
+        Table.SelectRows(BaseRelleno, each not EsSubcapVacio([Subcapitulo])),
+        {"Centro de Costos"},
+        {{"__ListaSubcaps", each
+            let vs = List.Distinct(List.Transform(List.RemoveNulls([Subcapitulo]), each Text.Trim(Text.From(_))))
+            in List.Sort(
+                List.Transform(vs, (v) => [Orig = v, Norm = FnNormSubcap(v)]),
+                each - Text.Length([Norm])), type list}})),
+
+    RellenoJoin1 = Table.ExpandTableColumn(
+        Table.NestedJoin(BaseRelleno, {"Centro de Costos", "__CodKey"}, MapaSubcapAct, {"Centro de Costos", "__CodKey"}, "__SP", JoinKind.LeftOuter),
+        "__SP", {"subcapAct"}),
+    RellenoJoin2 = Table.ExpandTableColumn(
+        Table.NestedJoin(RellenoJoin1, {"Centro de Costos"}, SubcapConocidos, {"Centro de Costos"}, "__SC", JoinKind.LeftOuter),
+        "__SC", {"__ListaSubcaps"}),
+
+    RellenoCalc = Table.AddColumn(RellenoJoin2, "__SubcapFill", each
+        if not EsSubcapVacio([Subcapitulo]) then [Subcapitulo]
+        else
+          let
+            capN = FnNormSubcap([Capitulo]),
+            actTxt = try Text.Trim(Text.From([Actividad])) otherwise "",
+            actN = FnNormSubcap(actTxt)
+          in
+            if Text.Contains(capN, "SAN AGUSTIN") or Text.Contains(actN, "SAN AGUSTIN") then "URBANISMO SAN AGUSTIN"
+            else if not EsSubcapVacio([subcapAct]) then [subcapAct]
+            else
+              let
+                sinUM = if Text.EndsWith(actTxt, ")") and Text.Contains(actTxt, "(")
+                        then Text.Trim(Text.BeforeDelimiter(actTxt, "(", {0, RelativePosition.FromEnd}))
+                        else actTxt,
+                sinUMN = FnNormSubcap(sinUM),
+                lista = if [__ListaSubcaps] = null then {} else [__ListaSubcaps],
+                cand = List.First(List.Select(lista, each [Norm] <> "" and Text.EndsWith(sinUMN, [Norm])), null)
+              in if cand <> null then cand[Orig] else null,
+        type text),
+
+    RellenoFinal = Table.RenameColumns(
+        Table.RemoveColumns(RellenoCalc, {"Subcapitulo", "subcapAct", "__CodKey", "__ListaSubcaps"}, MissingField.Ignore),
+        {{"__SubcapFill", "Subcapitulo"}}),
+
+    FinalRecortada = Table.SelectColumns(RellenoFinal, ColumnasFinalesArboleda, MissingField.UseNull),
 
     TablaMaestraFinal = Table.Buffer(FinalRecortada)
 in
