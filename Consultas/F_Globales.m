@@ -501,10 +501,35 @@ let
                         apuTxt    = Text.Combine(List.Select(Text.Split(apuRaw, " "), each _ <> ""), " "),
                         base      = if descTxt <> "" then descTxt else apuTxt,
                         pos       = if (not aplica) or base = "" then -1 else Text.PositionOf(base, " - ", Occurrence.Last),
-                        cola      = if pos < 0 then "" else Text.Trim(Text.Range(base, pos + 3)),
+                        // El reporte suele traer un guion suelto colgando al final del texto
+                        // ("... - GENERALES -"); se limpia con la misma funcion que usa el nombre.
+                        cola      = if pos < 0 then "" else FnQuitarGuionColgante(Text.Trim(Text.Range(base, pos + 3))),
                         cabeza    = if pos < 0 then "" else Text.Trim(Text.Range(base, 0, pos)),
                         valida    = cola <> "" and cabeza <> "" and Text.Length(cola) <= 60
                     in if valida then cola else null, type text),
+
+                // Canonicaliza subcapitulos derivados TRUNCADOS por el reporte (SINCO corta
+                // el texto en algunas filas: "ELE", "ELEC", "ELECTRIC" en vez de "ELECTRICO";
+                // "SALON SOCIA" en vez de "SALON SOCIAL"). Regla: si un valor derivado es
+                // PREFIJO (sin tildes, sin mayusculas) de otro valor derivado MAS LARGO y
+                // MAS FRECUENTE del mismo archivo, se reemplaza por el completo. Un subcapitulo
+                // real corto no se toca salvo que exista uno mas largo que empiece igual y
+                // tenga mas filas (las truncaduras son artefactos de pocas filas).
+                SubcapDerivadosLista = List.Buffer(
+                    let
+                        vals = List.RemoveNulls(Table.Column(ItemsConSubcapDerivado, "SubcapDerivado")),
+                        dist = List.Distinct(vals)
+                    in List.Transform(dist, (d) => [V = d, N = List.Count(List.Select(vals, (x) => x = d)), Norm = Text.Upper(FnRemoveAccentsSymbols(d))])),
+
+                FnCanonSubcap = (v as nullable text) as nullable text =>
+                    if v = null then null else
+                    let
+                        normV  = Text.Upper(FnRemoveAccentsSymbols(v)),
+                        propio = List.First(List.Select(SubcapDerivadosLista, each [Norm] = normV), [N = 0]),
+                        cands  = List.Select(SubcapDerivadosLista, each [Norm] <> normV and Text.StartsWith([Norm], normV) and [N] > propio[N]),
+                        mejor  = if List.Count(cands) = 0 then null
+                                 else List.Accumulate(cands, null, (s, c) => if s = null or Text.Length(c[Norm]) > Text.Length(s[Norm]) then c else s)
+                    in if mejor = null then v else mejor[V],
 
                 ItemsWithActividad = Table.AddColumn(ItemsConSubcapDerivado, "Actividad", each
                     let
@@ -565,7 +590,7 @@ let
                 // usa el derivado del sufijo del nombre (proyectos tipo TURPIAL).
                 SubcapUnificado0 = Table.AddColumn(ItemsWithActividad, "SubcapituloFinal", each
                     let s = if [Subcapitulo] = null then "" else Text.Trim(Text.From([Subcapitulo]))
-                    in if s <> "" then s else [SubcapDerivado], type text),
+                    in if s <> "" then s else FnCanonSubcap([SubcapDerivado]), type text),
                 SubcapUnificado = Table.RenameColumns(
                     Table.RemoveColumns(SubcapUnificado0, {"Subcapitulo", "SubcapDerivado"}),
                     {{"SubcapituloFinal", "Subcapitulo"}}),
