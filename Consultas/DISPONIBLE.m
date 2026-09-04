@@ -28,7 +28,12 @@ let
     }, null, MissingField.Ignore),
     
     PPTO_WithStdIns = Table.AddColumn(PPTO_Typed, "InsNorm", each FnRemoveAccentsSymbols([Ins]), type text),
-    PPTO_Grouped_Buffer = Table.Buffer(Table.Group(PPTO_WithStdIns, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "InsNorm"}, {{"Ins_Oficial", each List.First(List.RemoveNulls([Ins])), type text}, {"ValorTotal_PPTO_Bloque", each List.Sum([VT Presupuesto]), type number}, {"Unitario_PPTO_Bloque", each List.First(List.RemoveNulls([#"V/U Presupuesto"])), type number}})),
+    // Claves normalizadas (sin tildes) para el cruce con descargas: el seguimiento
+    // trae "SALON SOCIAL" con tilde y las descargas sin ella (o viceversa).
+    PPTO_WithNorm = Table.AddColumn(Table.AddColumn(PPTO_WithStdIns,
+        "ActNorm", each FnRemoveAccentsSymbols([Actividad]), type text),
+        "SubcapNorm", each FnRemoveAccentsSymbols(if [Subcapitulo] = null then "" else [Subcapitulo]), type text),
+    PPTO_Grouped_Buffer = Table.Buffer(Table.Group(PPTO_WithNorm, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "InsNorm"}, {{"Ins_Oficial", each List.First(List.RemoveNulls([Ins])), type text}, {"ValorTotal_PPTO_Bloque", each List.Sum([VT Presupuesto]), type number}, {"Unitario_PPTO_Bloque", each List.First(List.RemoveNulls([#"V/U Presupuesto"])), type number}, {"ActNorm", each List.First(List.RemoveNulls([ActNorm])), type text}, {"SubcapNorm", each List.First([SubcapNorm]), type text}})),
 
     // ============================================================
     // 4. PROCESAMIENTO ADJUDICADOS (COMPARATIVOS)
@@ -48,16 +53,38 @@ let
     DetCC_WithStdIns = Table.AddColumn(DetCC_Typed, "InsNorm", each FnRemoveAccentsSymbols([Ins]), type text),
     DetCC_Valid = Table.SelectRows(DetCC_WithStdIns, each [#"# CC - Comparativo"] <> null),
 
+    // Las descargas traen el subcapitulo PEGADO al nombre de la actividad
+    // ("3.03-LOSA INFERIOR 0.10M - TORRES (M2)") y la columna Subcapitulo vacia,
+    // mientras que el ppto (seguimiento) ya viene con nombre limpio + Subcapitulo
+    // lleno. Se deriva aqui igual (helper compartido) para que las claves crucen.
+    FnSepararSubcapDD = F_Globales[FnSepararSubcapDeNombre],
+    DetCC_Sep = Table.AddColumn(DetCC_Valid, "__Sep", each
+        let s = if [Subcapitulo] = null then "" else Text.Trim(Text.From([Subcapitulo]))
+        in if s <> "" then null else FnSepararSubcapDD([Actividad])),
+    DetCC_Derivado = Table.AddColumn(Table.AddColumn(DetCC_Sep,
+        "ActClave", each if [__Sep] <> null and [__Sep][Subcap] <> null then [__Sep][Nombre] else [Actividad], type text),
+        "SubcapClave", each
+            let s = if [Subcapitulo] = null then "" else Text.Trim(Text.From([Subcapitulo]))
+            in if s <> "" then [Subcapitulo] else (if [__Sep] <> null then [__Sep][Subcap] else null), type text),
+    DetCC_ConNorm = Table.AddColumn(Table.AddColumn(DetCC_Derivado,
+        "ActNorm", each FnRemoveAccentsSymbols([ActClave]), type text),
+        "SubcapNorm", each FnRemoveAccentsSymbols(if [SubcapClave] = null then "" else [SubcapClave]), type text),
+
     // ============================================================
     // 5. CRUCE 1: Alinear la base Adjudicada contra la estructura oficial
+    // (por claves normalizadas: sin tildes, con subcapitulo derivado)
     // ============================================================
-    DetCC_JoinPPTOBlock = Table.NestedJoin(DetCC_Valid, {"Centro de Costos", "Capitulo", "Actividad", "Subcapitulo", "InsNorm"}, PPTO_Grouped_Buffer, {"Centro de Costos", "Capitulo", "Actividad", "Subcapitulo", "InsNorm"}, "PPTOBlock", JoinKind.LeftOuter),
-    DetCC_Expanded = Table.ExpandTableColumn(DetCC_JoinPPTOBlock, "PPTOBlock", {"Codigo act", "Ins_Oficial", "ValorTotal_PPTO_Bloque", "Unitario_PPTO_Bloque"}, {"Codigo act", "Ins_Oficial", "ValorTotal_PPTO_Bloque", "Unitario_PPTO_Bloque"}),
-    DetCC_WithFinalIns = Table.AddColumn(DetCC_Expanded, "Ins_Final", each if [Ins_Oficial] <> null then [Ins_Oficial] else [Ins], type text),
+    DetCC_JoinPPTOBlock = Table.NestedJoin(DetCC_ConNorm, {"Centro de Costos", "Capitulo", "ActNorm", "SubcapNorm", "InsNorm"}, PPTO_Grouped_Buffer, {"Centro de Costos", "Capitulo", "ActNorm", "SubcapNorm", "InsNorm"}, "PPTOBlock", JoinKind.LeftOuter),
+    DetCC_Expanded = Table.ExpandTableColumn(DetCC_JoinPPTOBlock, "PPTOBlock", {"Codigo act", "Actividad", "Subcapitulo", "Ins_Oficial", "ValorTotal_PPTO_Bloque", "Unitario_PPTO_Bloque"}, {"Codigo act", "Act_Oficial", "Subcap_Oficial", "Ins_Oficial", "ValorTotal_PPTO_Bloque", "Unitario_PPTO_Bloque"}),
+    // Adoptar los nombres OFICIALES del ppto cuando hubo match, para que el
+    // Cruce 2 (que une por texto) siempre coincida.
+    DetCC_WithFinalIns0 = Table.AddColumn(DetCC_Expanded, "Ins_Final", each if [Ins_Oficial] <> null then [Ins_Oficial] else [Ins], type text),
+    DetCC_WithFinalIns1 = Table.AddColumn(DetCC_WithFinalIns0, "Act_Final", each if [Act_Oficial] <> null then [Act_Oficial] else [ActClave], type text),
+    DetCC_WithFinalIns = Table.AddColumn(DetCC_WithFinalIns1, "Subcap_Final", each if [Act_Oficial] <> null then [Subcap_Oficial] else [SubcapClave], type text),
 
     DetCC_WithCantidad = Table.AddColumn(DetCC_WithFinalIns, "Cantidad_Calc", each let total = [#"Valor Total ppto (CC)"], unit = [#"V/U ppto (CC)"] in if unit <> null and unit <> 0 then total / unit else null, type number),
-    DetCC_ReportShape = Table.SelectColumns(DetCC_WithCantidad, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "Ins_Final", "# CC - Comparativo", "Valor Total ppto (CC)", "V/U ppto (CC)", "Cantidad_Calc"}, MissingField.Ignore),
-    DetCC_FinalAdjudicados_Renamed = Table.RenameColumns(DetCC_ReportShape, {{"Ins_Final", "Ins"}}),
+    DetCC_ReportShape0 = Table.SelectColumns(DetCC_WithCantidad, {"Centro de Costos", "Codigo act", "Capitulo", "Act_Final", "Subcap_Final", "Ins_Final", "# CC - Comparativo", "Valor Total ppto (CC)", "V/U ppto (CC)", "Cantidad_Calc"}, MissingField.Ignore),
+    DetCC_FinalAdjudicados_Renamed = Table.RenameColumns(DetCC_ReportShape0, {{"Ins_Final", "Ins"}, {"Act_Final", "Actividad"}, {"Subcap_Final", "Subcapitulo"}}),
     DetCC_FinalAdjudicados = Table.AddColumn(DetCC_FinalAdjudicados_Renamed, "Tipo", each "Adjudicado", type text),
 
     // ============================================================
