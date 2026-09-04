@@ -496,8 +496,22 @@ let
                 // subcapitulos (confirmado con el usuario 2026-09-02). Si la cola
                 // extraida es uno de estos, se descarta y se re-extrae de lo anterior.
                 SubcapSufijosIgnorados = {"ELECTRICO"},
+                // Reconoce el sufijo completo Y sus truncaduras (el reporte corta el texto
+                // en algunas filas: "ELE", "ELEC", "ELECTRIC"): cualquier cola de 3+ letras
+                // que sea PREFIJO de un sufijo ignorado tambien se ignora.
                 EsSufijoIgnorado = (t as text) as logical =>
-                    List.Contains(SubcapSufijosIgnorados, Text.Upper(FnRemoveAccentsSymbols(t))),
+                    let norm = Text.Upper(FnRemoveAccentsSymbols(t))
+                    in List.AnyTrue(List.Transform(SubcapSufijosIgnorados, (s) =>
+                        norm = s or (Text.Length(norm) >= 3 and Text.StartsWith(s, norm)))),
+
+                // Mapeos manuales para truncaduras irrecuperables (el texto quedo cortado
+                // en TODOS los reportes y no hay de donde reconstruirlo). Confirmados por
+                // el usuario. Clave = valor derivado tal como queda; Valor = subcapitulo real.
+                SubcapOverrides = [#"APTOS (U" = "TORRES"],
+                FnAplicarOverrideSubcap = (v as nullable text) as nullable text =>
+                    if v = null then null
+                    else let o = try Record.Field(SubcapOverrides, v) otherwise null
+                         in if o <> null then o else v,
 
                 // Extrae la cola tras el ultimo " - " (limpiando el guion suelto final que
                 // suele traer el reporte), saltando sufijos ignorados de forma recursiva.
@@ -536,9 +550,9 @@ let
                         truncado  = desdeDesc <> null and Text.Contains(desdeDesc, "(") and not Text.Contains(desdeDesc, ")"),
                         desdeApu  = if (not aplica) or apuTxt = "" then null else FnExtraerSubcapDeTexto(apuTxt),
                         elegido   = if not aplica then null
-                                    else if desdeDesc = null or truncado then desdeApu
+                                    else if desdeDesc = null or truncado then (if desdeApu <> null then desdeApu else desdeDesc)
                                     else desdeDesc
-                    in elegido, type text),
+                    in FnAplicarOverrideSubcap(elegido), type text),
 
                 // Canonicaliza subcapitulos derivados TRUNCADOS por el reporte (SINCO corta
                 // el texto en algunas filas: "ELE", "ELEC", "ELECTRIC" en vez de "ELECTRICO";
