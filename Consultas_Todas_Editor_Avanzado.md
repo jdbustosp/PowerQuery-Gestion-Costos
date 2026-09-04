@@ -1307,11 +1307,14 @@ let
     DetCC_Sep = Table.AddColumn(DetCC_Valid, "__Sep", each
         let s = if [Subcapitulo] = null then "" else Text.Trim(Text.From([Subcapitulo]))
         in if s <> "" then null else FnSepararSubcapDD([Actividad])),
+    // El override tambien aplica a subcapitulos que YA vienen llenos en el archivo
+    // de descargas (traen truncaduras propias: "GEN", "SALON SOCIA", "URBANISMO").
+    FnOverrideSubcapDD = F_Globales[FnAplicarOverrideSubcap],
     DetCC_Derivado = Table.AddColumn(Table.AddColumn(DetCC_Sep,
         "ActClave", each if [__Sep] <> null and [__Sep][Subcap] <> null then [__Sep][Nombre] else [Actividad], type text),
         "SubcapClave", each
             let s = if [Subcapitulo] = null then "" else Text.Trim(Text.From([Subcapitulo]))
-            in if s <> "" then [Subcapitulo] else (if [__Sep] <> null then [__Sep][Subcap] else null), type text),
+            in if s <> "" then FnOverrideSubcapDD([Subcapitulo]) else (if [__Sep] <> null then [__Sep][Subcap] else null), type text),
     DetCC_ConNorm = Table.AddColumn(Table.AddColumn(DetCC_Derivado,
         "ActNorm", each FnRemoveAccentsSymbols([ActClave]), type text),
         "SubcapNorm", each FnRemoveAccentsSymbols(if [SubcapClave] = null then "" else [SubcapClave]), type text),
@@ -1371,7 +1374,7 @@ let
         in if s <> "" then null else FnSepararSubcap([Actividad])),
     ConSubcapDerivado1 = Table.AddColumn(ConSubcapDerivado0, "SubcapFinal", each
         let s = if [Subcapitulo] = null then "" else Text.Trim(Text.From([Subcapitulo]))
-        in if s <> "" then [Subcapitulo]
+        in if s <> "" then FnOverrideSubcapDD([Subcapitulo])
            else if [__Sep] <> null then [__Sep][Subcap] else null, type text),
     ConSubcapDerivado2 = Table.AddColumn(ConSubcapDerivado1, "ActividadFinal", each
         if [__Sep] <> null and [__Sep][Subcap] <> null then [__Sep][Nombre] else [Actividad], type text),
