@@ -321,6 +321,14 @@ let
                     in subTxt, type text),
 
                 ItemsSubcapituloFillDown  = Table.FillDown(ItemsWithSubcapitulo, {"Subcapitulo"}),
+
+                // true si el SEGUIMIENTO trae al menos una fila explicita "SUBCAPITULO:".
+                // Proyectos como TURPIAL no las traen: alli el subcapitulo viene pegado
+                // como sufijo del nombre de la actividad ("... - GENERALES") y se deriva
+                // mas abajo (SubcapDerivado). El gate evita aplicar esa heuristica en
+                // proyectos que si declaran subcapitulos (alli un " - X" final puede ser
+                // parte legitima del nombre y no un subcapitulo).
+                TieneSubcapExplicito = List.Contains(List.Buffer(Table.Column(ItemsWithTipoFila, "TipoFila")), "SubCapitulo"),
                 ItemsWithCodActRaw        = Table.AddColumn(ItemsSubcapituloFillDown, "CodigoActRaw", (r as record) =>
                     let tipo = Record.Field(r, "TipoFila") in if tipo = "Actividad" then Text.From(Record.Field(r, ItemsCodColName)) else null, type text),
                 // Descripcion real de la fila-Actividad en SEGUIMIENTO POR ITEMS, capturada y
@@ -477,7 +485,28 @@ let
                         else candidatos{0}),
                 ItemsExpandedAPU   = Table.ExpandRecordColumn(ItemsConAPUElegido, "APUElegido", {"NombreActAPU", "UM_Actividad"}, {"NombreActAPU", "UM_Actividad"}),
 
-                ItemsWithActividad = Table.AddColumn(ItemsExpandedAPU, "Actividad", each
+                // Subcapitulo DERIVADO del nombre de la actividad, solo cuando el proyecto
+                // no declara subcapitulos en el SEGUIMIENTO (ej. TURPIAL): el reporte de
+                // "Analisis De Precios Unitarios Items Presupuesto Detallado" agrega el
+                // subcapitulo como sufijo tras el ultimo " - " ("1.01 - COMISION ... - GENERALES").
+                // Se toma la cola despues del ULTIMO " - " como subcapitulo; el recorte del
+                // nombre lo hace la logica ya existente en ItemsWithActividad (patron conGuion).
+                ItemsConSubcapDerivado = Table.AddColumn(ItemsExpandedAPU, "SubcapDerivado", each
+                    let
+                        subcapSeg = if [Subcapitulo] = null then "" else Text.Trim(Text.From([Subcapitulo])),
+                        aplica    = (TieneSubcapExplicito = false) and subcapSeg = "",
+                        descRaw   = Text.Trim(Text.Replace(Text.From(if [DescActRaw] = null then "" else [DescActRaw]), "#(00A0)", " ")),
+                        descTxt   = Text.Combine(List.Select(Text.Split(descRaw, " "), each _ <> ""), " "),
+                        apuRaw    = Text.Trim(Text.Replace(Text.From(if [NombreActAPU] = null then "" else [NombreActAPU]), "#(00A0)", " ")),
+                        apuTxt    = Text.Combine(List.Select(Text.Split(apuRaw, " "), each _ <> ""), " "),
+                        base      = if descTxt <> "" then descTxt else apuTxt,
+                        pos       = if (not aplica) or base = "" then -1 else Text.PositionOf(base, " - ", Occurrence.Last),
+                        cola      = if pos < 0 then "" else Text.Trim(Text.Range(base, pos + 3)),
+                        cabeza    = if pos < 0 then "" else Text.Trim(Text.Range(base, 0, pos)),
+                        valida    = cola <> "" and cabeza <> "" and Text.Length(cola) <= 60
+                    in if valida then cola else null, type text),
+
+                ItemsWithActividad = Table.AddColumn(ItemsConSubcapDerivado, "Actividad", each
                     let
                         codTxt        = if [Codigo act]  = null then "" else [Codigo act],
                         // Prioridad: primero la descripcion real de SEGUIMIENTO (misma fuente
@@ -498,7 +527,10 @@ let
                         // una diferencia de espacios/caracteres invisibles entre los 2 campos
                         // (vienen de columnas distintas del mismo reporte, no siempre coinciden
                         // caracter por caracter aunque se vean iguales).
-                        subcapRaw     = Text.Trim(Text.Replace(Text.From(if [Subcapitulo] = null then "" else [Subcapitulo]), "#(00A0)", " ")),
+                        subcapFuenteSeg = if [Subcapitulo] = null then "" else Text.Trim(Text.From([Subcapitulo])),
+                        subcapFuente  = if subcapFuenteSeg <> "" then subcapFuenteSeg
+                                        else Text.From(if [SubcapDerivado] = null then "" else [SubcapDerivado]),
+                        subcapRaw     = Text.Trim(Text.Replace(subcapFuente, "#(00A0)", " ")),
                         subcapTxt     = Text.Combine(List.Select(Text.Split(subcapRaw, " "), each _ <> ""), " "),
                         // Si el Subcapitulo viene pegado con un guion separador ("Texto - SUBCAP"),
                         // se quita el bloque completo (guion incluido) para no dejar un guion
@@ -529,7 +561,16 @@ let
                                         else codTxt & "-" & nombreLimpio & " (" & umTxt & ")"
                     in actTxt, type text),
 
-                NumsTyped = Table.TransformColumns(ItemsWithActividad, {
+                // Unifica el Subcapitulo: el explicito del SEGUIMIENTO gana; si no hay,
+                // usa el derivado del sufijo del nombre (proyectos tipo TURPIAL).
+                SubcapUnificado0 = Table.AddColumn(ItemsWithActividad, "SubcapituloFinal", each
+                    let s = if [Subcapitulo] = null then "" else Text.Trim(Text.From([Subcapitulo]))
+                    in if s <> "" then s else [SubcapDerivado], type text),
+                SubcapUnificado = Table.RenameColumns(
+                    Table.RemoveColumns(SubcapUnificado0, {"Subcapitulo", "SubcapDerivado"}),
+                    {{"SubcapituloFinal", "Subcapitulo"}}),
+
+                NumsTyped = Table.TransformColumns(SubcapUnificado, {
                     {"Cantidad Presupuesto", each FxToNumberFlex(_), type number},
                     {"VT Presupuesto",       each FxToNumberFlex(_), Currency.Type},
                     {"Cantidad Proyectado",  each FxToNumberFlex(_), type number},
