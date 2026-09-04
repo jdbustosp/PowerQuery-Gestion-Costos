@@ -134,9 +134,17 @@ let
         // subcapitulo real ("... - CUARTO DE BASURAS - ELECTRICO"): NO son
         // subcapitulos. Se reconocen tambien sus truncaduras (ELE, ELEC...).
         SubcapSufijosIgnorados = {"ELECTRICO"},
-        // Truncaduras irrecuperables (texto cortado en TODOS los reportes),
-        // confirmadas por el usuario: derivado -> subcapitulo real.
-        SubcapOverrides = [#"APTOS (U" = "TORRES"],
+        // Truncaduras irrecuperables (texto cortado en el reporte de origen sin
+        // forma de reconstruirlo alli mismo), confirmadas por el usuario.
+        // Clave: valor derivado NORMALIZADO (mayusculas, sin tildes).
+        // Valor: subcapitulo real (con tildes via escape #(00D3) para mantener
+        // este archivo en ASCII puro y a salvo de problemas de decodificacion).
+        SubcapOverrides = [
+            #"APTOS (U"   = "TORRES",
+            GEN           = "GENERALES",
+            #"SALON SOCIA"= "SAL#(00D3)N SOCIAL",
+            URBANISMO     = "URBANISMO INTERIOR"
+        ],
 
         FnEsSufijoSubcapIgnorado = (t as text) as logical =>
             let norm = Text.Upper(FnRemoveAccentsSymbols(t))
@@ -145,7 +153,8 @@ let
 
         FnAplicarOverrideSubcap = (v as nullable text) as nullable text =>
             if v = null then null
-            else let o = try Record.Field(SubcapOverrides, v) otherwise null
+            else let norm = Text.Upper(FnRemoveAccentsSymbols(v)),
+                     o = try Record.Field(SubcapOverrides, norm) otherwise null
                  in if o <> null then o else v,
 
         // Quita guiones sueltos colgando al final de un texto (recursivo).
