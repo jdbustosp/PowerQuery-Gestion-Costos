@@ -276,18 +276,22 @@ let
     // Filas sin actividad (COMPRAS sueltas, CC CONSOLIDADO, PROVISIONES) no se
     // pueden clasificar y quedan en blanco.
     // ============================================================
+    // OJO: Text.From(null) devuelve null (NO error), asi que el try no lo captura
+    // y null = "" es false en M — hay que chequear null explicitamente.
     EsSubcapVacio = (v as any) as logical =>
-        (try Text.Trim(Text.From(v)) otherwise "") = "",
+        let t = try Text.Trim(Text.From(v)) otherwise "" in t = null or t = "",
+    FnTextoODef = (v as any) as text =>
+        let t = try Text.Trim(Text.From(v)) otherwise "" in if t = null then "" else t,
     FnParseCodAct = (cod as any, act as any) as text =>
-        let c = try Text.Trim(Text.From(cod)) otherwise ""
+        let c = FnTextoODef(cod)
         in if c <> "" then c
            else
-             let a = try Text.Trim(Text.From(act)) otherwise "",
-                 pre = if a = "" then "" else Text.Trim(Text.BeforeDelimiter(a, "-")),
+             let a = FnTextoODef(act),
+                 pre = if a = "" then "" else FnTextoODef(Text.BeforeDelimiter(a, "-")),
                  esCodigo = pre <> "" and Text.Remove(pre, {"0".."9", "."}) = ""
              in if esCodigo then pre else "",
     FnNormSubcap = (v as any) as text =>
-        try Text.Upper(FnRemoveAccentsSymbols(Text.From(v))) otherwise "",
+        let t = try Text.Upper(FnRemoveAccentsSymbols(Text.From(v))) otherwise "" in if t = null then "" else t,
 
     BaseRelleno = Table.Buffer(Table.AddColumn(FinalOCLimpia, "__CodKey",
         each FnParseCodAct([Codigo act], [Actividad]), type text)),
@@ -320,7 +324,7 @@ let
         else
           let
             capN = FnNormSubcap([Capitulo]),
-            actTxt = try Text.Trim(Text.From([Actividad])) otherwise "",
+            actTxt = FnTextoODef([Actividad]),
             actN = FnNormSubcap(actTxt)
           in
             if Text.Contains(capN, "SAN AGUSTIN") or Text.Contains(actN, "SAN AGUSTIN") then "URBANISMO SAN AGUSTIN"
