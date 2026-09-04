@@ -89,8 +89,25 @@ let
         ([Tipo] = "Adjudicado" and [#"Valor Total ppto (CC)"] <> null)
     ),
     
-    Final_Ordered = Table.ReorderColumns(UnionFiltered, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "Ins", "# CC - Comparativo", "Tipo", "Cantidad_Calc", "V/U ppto (CC)", "Valor Total ppto (CC)"}, MissingField.Ignore),
-    
+    // Subcapitulo embebido en el nombre (proyectos tipo TURPIAL): las filas que
+    // llegan sin Subcapitulo pero con el patron "ACTIVIDAD - SUBCAP (UM)" en el
+    // nombre lo derivan con el helper compartido, y el nombre queda limpio.
+    FnSepararSubcap = F_Globales[FnSepararSubcapDeNombre],
+    ConSubcapDerivado0 = Table.AddColumn(UnionFiltered, "__Sep", each
+        let s = if [Subcapitulo] = null then "" else Text.Trim(Text.From([Subcapitulo]))
+        in if s <> "" then null else FnSepararSubcap([Actividad])),
+    ConSubcapDerivado1 = Table.AddColumn(ConSubcapDerivado0, "SubcapFinal", each
+        let s = if [Subcapitulo] = null then "" else Text.Trim(Text.From([Subcapitulo]))
+        in if s <> "" then [Subcapitulo]
+           else if [__Sep] <> null then [__Sep][Subcap] else null, type text),
+    ConSubcapDerivado2 = Table.AddColumn(ConSubcapDerivado1, "ActividadFinal", each
+        if [__Sep] <> null and [__Sep][Subcap] <> null then [__Sep][Nombre] else [Actividad], type text),
+    ConSubcapDerivado = Table.RenameColumns(
+        Table.RemoveColumns(ConSubcapDerivado2, {"Subcapitulo", "Actividad", "__Sep"}),
+        {{"SubcapFinal", "Subcapitulo"}, {"ActividadFinal", "Actividad"}}),
+
+    Final_Ordered = Table.ReorderColumns(ConSubcapDerivado, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "Ins", "# CC - Comparativo", "Tipo", "Cantidad_Calc", "V/U ppto (CC)", "Valor Total ppto (CC)"}, MissingField.Ignore),
+
     TablaFinal = Final_Ordered
 in
     TablaFinal

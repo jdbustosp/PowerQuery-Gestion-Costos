@@ -167,17 +167,26 @@ let
     BaseConBanderasSafe = Table.ReplaceValue(BaseConBanderas, null, false, Replacer.ReplaceValue, ColsBanderas),
 
     // REGLA SIMPLE (2026-09-02, definida por el usuario): la Proyeccion Colsubsidio es
-    // lo asegurado (contratos + ordenes de compra) mas el presupuesto de lo que falta
-    // por adjudicar. Sin escenarios: el "motor" de banderas de arriba quedo sin uso
-    // (M es perezoso: al no referenciarse, no se evalua) y puede retirarse en una
-    // limpieza futura.
-    AplicarProyeccion = Table.AddColumn(AddVUAseg, "VT Proyectado Colsubsidio", each
-        if [Tipo] = "POR ADJUDICAR" then [#"Valor Total ppto (CC)"]
+    // lo asegurado (contratos + ordenes de compra) mas el presupuesto de lo que FALTA
+    // por adjudicar. "Falta" = la actividad NO tiene nada asegurado todavia: si la
+    // actividad ya tiene contratos/OC (asegurado > 0), su fila POR ADJUDICAR proyecta 0
+    // (evita el doble conteo ppto + asegurado en items ya adjudicados). Sin escenarios:
+    // el "motor" de banderas quedo sin uso (M es perezoso, no se evalua) y puede
+    // retirarse en una limpieza futura.
+    AsegPorActividad = Table.Buffer(Table.Group(
+        Table.SelectRows(AddVUAseg, each [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS"),
+        {"Centro de Costos", "Codigo act"},
+        {{"vtAsegAct", each List.Sum(List.Transform([VT Asegurada], each ToNumber0(_))), type number}})),
+    ConAsegActividad = Table.ExpandTableColumn(
+        Table.NestedJoin(AddVUAseg, {"Centro de Costos", "Codigo act"}, AsegPorActividad, {"Centro de Costos", "Codigo act"}, "__AA", JoinKind.LeftOuter),
+        "__AA", {"vtAsegAct"}),
+    AplicarProyeccion = Table.AddColumn(ConAsegActividad, "VT Proyectado Colsubsidio", each
+        if [Tipo] = "POR ADJUDICAR" then (if ToNumber0([vtAsegAct]) > 0 then 0 else [#"Valor Total ppto (CC)"])
         else if [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS" then (if [VT Asegurada] <> 0 then [VT Asegurada] else null)
         else null,
     type number),
 
-    FinalClean = Table.RemoveColumns(AplicarProyeccion, ColsBanderas, MissingField.Ignore),
+    FinalClean = Table.RemoveColumns(AplicarProyeccion, ColsBanderas & {"vtAsegAct"}, MissingField.Ignore),
     FinalSinErrores = Table.ReplaceErrorValues(FinalClean, List.Transform(Table.ColumnNames(FinalClean), each {_, null})),
 
     // Campo para tablas dinamicas: relaciona No_Prov solo por OC normalizada.

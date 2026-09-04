@@ -275,17 +275,26 @@ let
     BaseConBanderasSafe = Table.ReplaceValue(BaseConBanderas, null, false, Replacer.ReplaceValue, ColsBanderas),
 
     // REGLA SIMPLE (2026-09-02, definida por el usuario): la Proyeccion Colsubsidio es
-    // lo asegurado (contratos + ordenes de compra) mas el presupuesto de lo que falta
-    // por adjudicar. Sin escenarios: el "motor" de banderas de arriba quedo sin uso
-    // (M es perezoso: al no referenciarse, no se evalua) y puede retirarse en una
-    // limpieza futura.
-    AplicarProyeccion = Table.AddColumn(AddVUAseg, "VT Proyectado Colsubsidio", each
-        if [Tipo] = "POR ADJUDICAR" then [#"Valor Total ppto (CC)"]
+    // lo asegurado (contratos + ordenes de compra) mas el presupuesto de lo que FALTA
+    // por adjudicar. "Falta" = la actividad NO tiene nada asegurado todavia: si la
+    // actividad ya tiene contratos/OC (asegurado > 0), su fila POR ADJUDICAR proyecta 0
+    // (evita el doble conteo ppto + asegurado en items ya adjudicados). Sin escenarios:
+    // el "motor" de banderas quedo sin uso (M es perezoso, no se evalua) y puede
+    // retirarse en una limpieza futura.
+    AsegPorActividad = Table.Buffer(Table.Group(
+        Table.SelectRows(AddVUAseg, each [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS"),
+        {"Centro de Costos", "Codigo act"},
+        {{"vtAsegAct", each List.Sum(List.Transform([VT Asegurada], each ToNumber0(_))), type number}})),
+    ConAsegActividad = Table.ExpandTableColumn(
+        Table.NestedJoin(AddVUAseg, {"Centro de Costos", "Codigo act"}, AsegPorActividad, {"Centro de Costos", "Codigo act"}, "__AA", JoinKind.LeftOuter),
+        "__AA", {"vtAsegAct"}),
+    AplicarProyeccion = Table.AddColumn(ConAsegActividad, "VT Proyectado Colsubsidio", each
+        if [Tipo] = "POR ADJUDICAR" then (if ToNumber0([vtAsegAct]) > 0 then 0 else [#"Valor Total ppto (CC)"])
         else if [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS" then (if [VT Asegurada] <> 0 then [VT Asegurada] else null)
         else null,
     type number),
 
-    FinalClean = Table.RemoveColumns(AplicarProyeccion, ColsBanderas, MissingField.Ignore),
+    FinalClean = Table.RemoveColumns(AplicarProyeccion, ColsBanderas & {"vtAsegAct"}, MissingField.Ignore),
     FinalSinErrores = Table.ReplaceErrorValues(FinalClean, List.Transform(Table.ColumnNames(FinalClean), each {_, null})),
 
     // Campo para tablas dinamicas: relaciona No_Prov solo por OC normalizada.
@@ -1326,8 +1335,25 @@ let
         ([Tipo] = "Adjudicado" and [#"Valor Total ppto (CC)"] <> null)
     ),
     
-    Final_Ordered = Table.ReorderColumns(UnionFiltered, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "Ins", "# CC - Comparativo", "Tipo", "Cantidad_Calc", "V/U ppto (CC)", "Valor Total ppto (CC)"}, MissingField.Ignore),
-    
+    // Subcapitulo embebido en el nombre (proyectos tipo TURPIAL): las filas que
+    // llegan sin Subcapitulo pero con el patron "ACTIVIDAD - SUBCAP (UM)" en el
+    // nombre lo derivan con el helper compartido, y el nombre queda limpio.
+    FnSepararSubcap = F_Globales[FnSepararSubcapDeNombre],
+    ConSubcapDerivado0 = Table.AddColumn(UnionFiltered, "__Sep", each
+        let s = if [Subcapitulo] = null then "" else Text.Trim(Text.From([Subcapitulo]))
+        in if s <> "" then null else FnSepararSubcap([Actividad])),
+    ConSubcapDerivado1 = Table.AddColumn(ConSubcapDerivado0, "SubcapFinal", each
+        let s = if [Subcapitulo] = null then "" else Text.Trim(Text.From([Subcapitulo]))
+        in if s <> "" then [Subcapitulo]
+           else if [__Sep] <> null then [__Sep][Subcap] else null, type text),
+    ConSubcapDerivado2 = Table.AddColumn(ConSubcapDerivado1, "ActividadFinal", each
+        if [__Sep] <> null and [__Sep][Subcap] <> null then [__Sep][Nombre] else [Actividad], type text),
+    ConSubcapDerivado = Table.RenameColumns(
+        Table.RemoveColumns(ConSubcapDerivado2, {"Subcapitulo", "Actividad", "__Sep"}),
+        {{"SubcapFinal", "Subcapitulo"}, {"ActividadFinal", "Actividad"}}),
+
+    Final_Ordered = Table.ReorderColumns(ConSubcapDerivado, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "Ins", "# CC - Comparativo", "Tipo", "Cantidad_Calc", "V/U ppto (CC)", "Valor Total ppto (CC)"}, MissingField.Ignore),
+
     TablaFinal = Final_Ordered
 in
     TablaFinal
@@ -1464,6 +1490,77 @@ let
                 result = if usarLatin1 then Text.FromBinary(buf, 28591) else utf8
             in
                 result,
+
+        // ============================================================
+        // Subcapitulo embebido en el nombre (proyectos tipo TURPIAL)
+        // ============================================================
+        // Sufijos de "frente"/especialidad que el reporte agrega DESPUES del
+        // subcapitulo real ("... - CUARTO DE BASURAS - ELECTRICO"): NO son
+        // subcapitulos. Se reconocen tambien sus truncaduras (ELE, ELEC...).
+        SubcapSufijosIgnorados = {"ELECTRICO"},
+        // Truncaduras irrecuperables (texto cortado en TODOS los reportes),
+        // confirmadas por el usuario: derivado -> subcapitulo real.
+        SubcapOverrides = [#"APTOS (U" = "TORRES"],
+
+        FnEsSufijoSubcapIgnorado = (t as text) as logical =>
+            let norm = Text.Upper(FnRemoveAccentsSymbols(t))
+            in List.AnyTrue(List.Transform(SubcapSufijosIgnorados, (s) =>
+                norm = s or (Text.Length(norm) >= 3 and Text.StartsWith(s, norm)))),
+
+        FnAplicarOverrideSubcap = (v as nullable text) as nullable text =>
+            if v = null then null
+            else let o = try Record.Field(SubcapOverrides, v) otherwise null
+                 in if o <> null then o else v,
+
+        // Quita guiones sueltos colgando al final de un texto (recursivo).
+        FnQuitarGuionFinal = (t as text) as text =>
+            let r = Text.Trim(t)
+            in if Text.EndsWith(r, "-") then @FnQuitarGuionFinal(Text.Range(r, 0, Text.Length(r) - 1)) else r,
+
+        // Extrae la cola tras el ultimo " - " (con limpieza de guion colgante),
+        // saltando sufijos ignorados de forma recursiva. null si no hay cola valida.
+        FnExtraerSubcapDeTexto = (txt as text) as nullable text =>
+            let
+                pos    = Text.PositionOf(txt, " - ", Occurrence.Last),
+                cola   = if pos < 0 then "" else FnQuitarGuionFinal(Text.Trim(Text.Range(txt, pos + 3))),
+                cabeza = if pos < 0 then "" else Text.Trim(Text.Range(txt, 0, pos)),
+                valida = cola <> "" and cabeza <> "" and Text.Length(cola) <= 60
+            in
+                if not valida then null
+                else if FnEsSufijoSubcapIgnorado(cola) then @FnExtraerSubcapDeTexto(cabeza)
+                else cola,
+
+        // Quita del final de un nombre los sufijos ignorados (" - ELECTRICO").
+        FnQuitarSufijosSubcapIgnorados = (txt as text) as text =>
+            let
+                pos    = Text.PositionOf(txt, " - ", Occurrence.Last),
+                cola   = if pos < 0 then "" else FnQuitarGuionFinal(Text.Trim(Text.Range(txt, pos + 3))),
+                cabeza = if pos < 0 then "" else Text.Trim(Text.Range(txt, 0, pos))
+            in if pos >= 0 and cola <> "" and FnEsSufijoSubcapIgnorado(cola) then @FnQuitarSufijosSubcapIgnorados(cabeza) else txt,
+
+        // Separa "NOMBRE - SUBCAP (UM)" en [Nombre, Subcap]: desprende la unidad final
+        // "(UM)" si existe, quita sufijos ignorados, extrae el subcapitulo (con overrides)
+        // y devuelve el nombre sin el subcapitulo, re-anexando la unidad si no quedo ya.
+        // Para nombres cuyo subcapitulo viene DESPUES de la unidad ("X (M3) - TANQUE")
+        // o antes ("X - TANQUE (M3)") funciona en ambos ordenes.
+        FnSepararSubcapDeNombre = (nombreRaw as nullable text) as record =>
+            let
+                txt0   = if nombreRaw = null then "" else Text.Trim(Text.Replace(Text.From(nombreRaw), "#(00A0)", " ")),
+                txt    = Text.Combine(List.Select(Text.Split(txt0, " "), each _ <> ""), " "),
+                // desprender "(UM)" final si existe
+                tieneUM = Text.EndsWith(txt, ")") and Text.PositionOf(txt, "(", Occurrence.Last) >= 0,
+                posPar  = if tieneUM then Text.PositionOf(txt, "(", Occurrence.Last) else -1,
+                um      = if tieneUM then Text.Range(txt, posPar) else "",
+                cuerpo0 = if tieneUM then Text.Trim(Text.Range(txt, 0, posPar)) else txt,
+                cuerpo  = FnQuitarGuionFinal(FnQuitarSufijosSubcapIgnorados(cuerpo0)),
+                subcapX = FnExtraerSubcapDeTexto(cuerpo),
+                subcap  = FnAplicarOverrideSubcap(subcapX),
+                posTail = if subcapX = null then -1 else Text.PositionOf(cuerpo, " - ", Occurrence.Last),
+                cabeza  = if posTail < 0 then cuerpo else FnQuitarGuionFinal(Text.Trim(Text.Range(cuerpo, 0, posTail))),
+                nombreF0 = if subcapX = null then cuerpo else cabeza,
+                nombreF  = if um = "" or Text.EndsWith(nombreF0, um) then nombreF0 else nombreF0 & " " & um
+            in
+                [Nombre = nombreF, Subcap = subcap],
 
         FnPrepareTableWithHeader = (tbl as table) as table =>
             let
@@ -1829,49 +1926,9 @@ let
                 // subcapitulo como sufijo tras el ultimo " - " ("1.01 - COMISION ... - GENERALES").
                 // Se toma la cola despues del ULTIMO " - " como subcapitulo; el recorte del
                 // nombre lo hace la logica ya existente en ItemsWithActividad (patron conGuion).
-                // Sufijos de "frente"/especialidad que el reporte agrega DESPUES del
-                // subcapitulo real ("... - CUARTO DE BASURAS - ELECTRICO"): NO son
-                // subcapitulos (confirmado con el usuario 2026-09-02). Si la cola
-                // extraida es uno de estos, se descarta y se re-extrae de lo anterior.
-                SubcapSufijosIgnorados = {"ELECTRICO"},
-                // Reconoce el sufijo completo Y sus truncaduras (el reporte corta el texto
-                // en algunas filas: "ELE", "ELEC", "ELECTRIC"): cualquier cola de 3+ letras
-                // que sea PREFIJO de un sufijo ignorado tambien se ignora.
-                EsSufijoIgnorado = (t as text) as logical =>
-                    let norm = Text.Upper(FnRemoveAccentsSymbols(t))
-                    in List.AnyTrue(List.Transform(SubcapSufijosIgnorados, (s) =>
-                        norm = s or (Text.Length(norm) >= 3 and Text.StartsWith(s, norm)))),
-
-                // Mapeos manuales para truncaduras irrecuperables (el texto quedo cortado
-                // en TODOS los reportes y no hay de donde reconstruirlo). Confirmados por
-                // el usuario. Clave = valor derivado tal como queda; Valor = subcapitulo real.
-                SubcapOverrides = [#"APTOS (U" = "TORRES"],
-                FnAplicarOverrideSubcap = (v as nullable text) as nullable text =>
-                    if v = null then null
-                    else let o = try Record.Field(SubcapOverrides, v) otherwise null
-                         in if o <> null then o else v,
-
-                // Extrae la cola tras el ultimo " - " (limpiando el guion suelto final que
-                // suele traer el reporte), saltando sufijos ignorados de forma recursiva.
-                FnExtraerSubcapDeTexto = (txt as text) as nullable text =>
-                    let
-                        pos    = Text.PositionOf(txt, " - ", Occurrence.Last),
-                        cola   = if pos < 0 then "" else FnQuitarGuionColgante(Text.Trim(Text.Range(txt, pos + 3))),
-                        cabeza = if pos < 0 then "" else Text.Trim(Text.Range(txt, 0, pos)),
-                        valida = cola <> "" and cabeza <> "" and Text.Length(cola) <= 60
-                    in
-                        if not valida then null
-                        else if EsSufijoIgnorado(cola) then @FnExtraerSubcapDeTexto(cabeza)
-                        else cola,
-
-                // Quita del final de un nombre los sufijos ignorados (" - ELECTRICO"),
-                // para que tampoco queden pegados al nombre de la actividad.
-                FnQuitarSufijosIgnorados = (txt as text) as text =>
-                    let
-                        pos    = Text.PositionOf(txt, " - ", Occurrence.Last),
-                        cola   = if pos < 0 then "" else FnQuitarGuionColgante(Text.Trim(Text.Range(txt, pos + 3))),
-                        cabeza = if pos < 0 then "" else Text.Trim(Text.Range(txt, 0, pos))
-                    in if pos >= 0 and cola <> "" and EsSufijoIgnorado(cola) then @FnQuitarSufijosIgnorados(cabeza) else txt,
+                // Helpers de subcapitulo embebido: definidos a nivel de F_Globales
+                // (los usa tambien DISPONIBLE para los POR ADJUDICAR); aqui solo un alias.
+                FnQuitarSufijosIgnorados = FnQuitarSufijosSubcapIgnorados,
 
                 ItemsConSubcapDerivado = Table.AddColumn(ItemsExpandedAPU, "SubcapDerivado", each
                     let
