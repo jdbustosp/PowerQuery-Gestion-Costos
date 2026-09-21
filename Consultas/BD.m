@@ -180,12 +180,26 @@ let
     ConAsegActividad = Table.ExpandTableColumn(
         Table.NestedJoin(AddVUAseg, {"Centro de Costos", "Codigo act"}, AsegPorActividad, {"Centro de Costos", "Codigo act"}, "__AA", JoinKind.LeftOuter),
         "__AA", {"vtAsegAct"}),
+    // Comparativos YA contratados: su # OC / Contrato (tabla Det_CC, filas Tipo CC)
+    // tiene valor asegurado en SINCO (filas CONTRATO/COMPRAS con esa OC).
+    FnOCKey = (v as any) as text => let k = CleanOCKey(v) in if k = null then "" else k,
+    OCsAseguradas = List.Buffer(List.Distinct(List.Transform(
+        Table.SelectRows(AddVUAseg, each ([Tipo] = "CONTRATO" or [Tipo] = "COMPRAS") and ToNumber0([VT Asegurada]) <> 0)[#"# OC / Contrato"],
+        FnOCKey))),
+    ComparativosContratados = List.Buffer(List.Distinct(List.Transform(
+        Table.SelectRows(AddVUAseg, each [Tipo] = "CC" and List.Contains(OCsAseguradas, FnOCKey([#"# OC / Contrato"])) and FnOCKey([#"# OC / Contrato"]) <> "")[#"# CC - Comparativo"],
+        FnTextoODef))),
     AplicarProyeccion = Table.AddColumn(ConAsegActividad, "VT Proyectado Colsubsidio", each
         if [Tipo] = "POR ADJUDICAR" then (if ToNumber0([vtAsegAct]) > 0 then 0 else [#"Valor Total ppto (CC)"])
-        // ADJUDICADO = descargado con comparativo aprobado pero SIN contrato/OC en
-        // SINCO todavia: proyecta el valor adjudicado. Cuando el contrato ya se monta
-        // en SINCO (asegurado > 0 en la actividad), pasa a 0 y cuenta el asegurado.
-        else if [Tipo] = "ADJUDICADO" then (if ToNumber0([vtAsegAct]) > 0 then 0 else [#"Valor Total ppto (CC)"])
+        // ADJUDICADO = descargado. Proyecta su valor SOLO mientras el comparativo no
+        // tenga contrato/OC en SINCO (ej. pintura: comparativo aprobado, contrato sin
+        // montar). Si el comparativo ya esta contratado, lo que no quedo en el contrato
+        // no se va a gastar: proyecta 0 (regla del usuario: asegurado + por adjudicar).
+        // Tambien 0 si la actividad ya tiene asegurado por otro contrato.
+        else if [Tipo] = "ADJUDICADO" then
+            (if List.Contains(ComparativosContratados, FnTextoODef([#"# CC - Comparativo"])) then 0
+             else if ToNumber0([vtAsegAct]) > 0 then 0
+             else [#"Valor Total ppto (CC)"])
         else if [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS" then (if [VT Asegurada] <> 0 then [VT Asegurada] else null)
         else null,
     type number),
