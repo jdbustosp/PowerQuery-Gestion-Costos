@@ -169,15 +169,15 @@ let
 
     ColumnasReordenadas = Table.SelectColumns(OrigenLimpio, ColumnasOrden, MissingField.Ignore),
 
-    // Recorte TEMPRANO (solo La Arboleda): estas 16 columnas no se usan en NINGUN calculo
+    // Recorte TEMPRANO (solo La Arboleda): estas 14 columnas no se usan en NINGUN calculo
     // intermedio de todo el pipeline (verificado: 0 referencias [Campo] en BD.m), asi que
     // se quitan aqui mismo en vez de esperar al final. Esto reduce el ancho de tabla que
     // procesan TODOS los pasos siguientes (TransformColumns, ReplaceErrorValues, Table.Group,
     // NestedJoin), no solo la escritura final a la hoja.
     ColumnasReordenadas_Trim = Table.RemoveColumns(ColumnasReordenadas, {
         "Codigo ins", "V/U Comprado", "V/U Contratado", "V/U Presupuesto",
-        "Cantidad Cortes", "Cantidad Cons Cols", "VT Cons Cols", "Cantidad_Calc",
-        "V/U ppto (CC)", "Estado", "Fecha_de_pago", "Clasificador_Actividad",
+        "Cantidad Cortes", "Cantidad Cons Cols", "VT Cons Cols",
+        "Estado", "Fecha_de_pago", "Clasificador_Actividad",
         "Capitulo_Costo directo", "NIT", "No_Factura", "Fecha_Factura"
     }, MissingField.Ignore),
 
@@ -368,7 +368,11 @@ let
         // Agregadas 2026-08-27: las calcula AddCantAseg/AddVUAseg mas arriba pero se
         // perdian aqui en el recorte final. Las necesita SINCO.m (Bosque de Turpial)
         // para armar Cantidad/V.U. asegurada = Cantidad y VT Contratado + Comprado.
-        "Cantidad asegurada", "V/U asegurada"
+        "Cantidad asegurada", "V/U asegurada",
+        // Agregadas 2026-09-21: presupuesto descargado por comparativo (filas
+        // ADJUDICADO/POR ADJUDICAR de DISPONIBLE), para comparar ppto vs aprobado
+        // en la dinamica de comparativos.
+        "Cantidad ppto (CC)", "V/U ppto (CC)"
     },
     // ============================================================
     // RELLENO DE SUBCAPITULO (2026-09-04): muchas filas (COMPRAS, CONTRATO, CC,
@@ -453,7 +457,8 @@ let
         Table.RemoveColumns(RellenoCalc, {"Subcapitulo", "subcapAct", "__CodKey", "__ListaSubcaps"}, MissingField.Ignore),
         {{"__SubcapFill", "Subcapitulo"}}),
 
-    FinalRecortada = Table.SelectColumns(RellenoFinal, ColumnasFinalesArboleda, MissingField.UseNull),
+    RellenoConPpto = Table.RenameColumns(RellenoFinal, {{"Cantidad_Calc", "Cantidad ppto (CC)"}}, MissingField.Ignore),
+    FinalRecortada = Table.SelectColumns(RellenoConPpto, ColumnasFinalesArboleda, MissingField.UseNull),
 
     TablaMaestraFinal = Table.Buffer(FinalRecortada)
 in
