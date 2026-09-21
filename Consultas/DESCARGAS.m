@@ -91,7 +91,7 @@ let
         {"Capitulo", each if _ = null then null else Text.Trim(Text.From(_)), type text},
         {"Actividad", each if _ = null then null else Text.Trim(Text.From(_)), type text},
         {"Ins", each if _ = null then null else Text.Trim(Text.From(_)), type text},
-        {"# CC - Comparativo", each FnNormalizeSpaces(_), type text},
+        {"# CC - Comparativo", each F_Globales[FnNormalizeComparativo](_), type text},
         {"# CC", each FnNormalizeSpaces(_), type text},
         {"Comparativo", each FnNormalizeSpaces(_), type text},
 

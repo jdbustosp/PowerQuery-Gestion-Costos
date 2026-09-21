@@ -112,6 +112,20 @@ let
                     in if sinEspGuion = "" then null else sinEspGuion
             ) otherwise null,
 
+        // Clave canonica de "# CC - Comparativo": FnNormalizeSpaces + numero inicial a 3
+        // digitos ("31-MANO DE OBRA" -> "031-MANO DE OBRA", "5-X" -> "005-X"). Los usuarios
+        // escriben el mismo comparativo con y sin ceros a la izquierda en Det_CC,
+        // aprobaciones y descargas, y las dinamicas agrupan por el texto exacto.
+        FnNormalizeComparativo = (t as any) as nullable text =>
+            let
+                s = FnNormalizeSpaces(t),
+                pre = if s = null or not Text.Contains(s, "-") then null else Text.BeforeDelimiter(s, "-"),
+                esNum = pre <> null and pre <> "" and Text.Remove(pre, {"0".."9"}) = ""
+            in
+                if esNum and Text.Length(pre) < 3
+                then Text.PadStart(pre, 3, "0") & "-" & Text.AfterDelimiter(s, "-")
+                else s,
+
         // Decodifica un binario HTML/texto de los reportes SINCO detectando la codificacion:
         // intenta UTF-8 y, si el resultado trae el caracter de reemplazo U+FFFD (tipico de
         // decodificar Latin-1/Windows-1252 como UTF-8: la enie y tildes se vuelven "?"),

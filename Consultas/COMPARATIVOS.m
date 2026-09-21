@@ -40,7 +40,7 @@ let
         {"# OC / Contrato", each if _ = null then null else Text.Trim(Text.From(_)), type text},
         {"Nombre Contratista", each if _ = null then null else Text.Trim(Text.From(_)), type text},
         // Claves de cruce contra APROBACIONES_SP: normalizar espacios (dobles/duros), no solo Trim
-        {"# CC - Comparativo", each FnNormalizeSpaces(_), type text},
+        {"# CC - Comparativo", each F_Globales[FnNormalizeComparativo](_), type text},
         {"# CC", each FnNormalizeSpaces(_), type text},
         {"Comparativo", each FnNormalizeSpaces(_), type text},
         {"Clasificador", each if _ = null then null else Text.Trim(Text.From(_)), type text},

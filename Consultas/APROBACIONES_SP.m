@@ -58,7 +58,7 @@ let
         {"Nombre Contratista", each FnTrimText(_), type text},
         // Clave de cruce contra Det_CC/COMPARATIVOS: normalizar espacios dobles/duros que
         // vienen del consolidador de SharePoint, no solo Trim de extremos
-        {"# CC - Comparativo", each FnNormalizeSpaces(_), type text},
+        {"# CC - Comparativo", each F_Globales[FnNormalizeComparativo](_), type text},
         {"Cantidad CC Cons", each FxToNumberFlex(_), type number},
         {"V/U CC cons", each FxToNumberFlex(_), type number},
         {"VT CC cons", each FxToNumberFlex(_), type number}

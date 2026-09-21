@@ -65,7 +65,7 @@ let
         {"Nombre Contratista", each FnTrimText(_), type text},
         // Clave de cruce contra Det_CC/COMPARATIVOS: normalizar espacios dobles/duros que
         // vienen del consolidador de SharePoint, no solo Trim de extremos
-        {"# CC - Comparativo", each FnNormalizeSpaces(_), type text},
+        {"# CC - Comparativo", each F_Globales[FnNormalizeComparativo](_), type text},
         {"Cantidad CC Cons", each FxToNumberFlex(_), type number},
         {"V/U CC cons", each FxToNumberFlex(_), type number},
         {"VT CC cons", each FxToNumberFlex(_), type number}
@@ -511,7 +511,7 @@ let
         {"# OC / Contrato", each if _ = null then null else Text.Trim(Text.From(_)), type text},
         {"Nombre Contratista", each if _ = null then null else Text.Trim(Text.From(_)), type text},
         // Claves de cruce contra APROBACIONES_SP: normalizar espacios (dobles/duros), no solo Trim
-        {"# CC - Comparativo", each FnNormalizeSpaces(_), type text},
+        {"# CC - Comparativo", each F_Globales[FnNormalizeComparativo](_), type text},
         {"# CC", each FnNormalizeSpaces(_), type text},
         {"Comparativo", each FnNormalizeSpaces(_), type text},
         {"Clasificador", each if _ = null then null else Text.Trim(Text.From(_)), type text},
@@ -1171,7 +1171,7 @@ let
         {"Capitulo", each if _ = null then null else Text.Trim(Text.From(_)), type text},
         {"Actividad", each if _ = null then null else Text.Trim(Text.From(_)), type text},
         {"Ins", each if _ = null then null else Text.Trim(Text.From(_)), type text},
-        {"# CC - Comparativo", each FnNormalizeSpaces(_), type text},
+        {"# CC - Comparativo", each F_Globales[FnNormalizeComparativo](_), type text},
         {"# CC", each FnNormalizeSpaces(_), type text},
         {"Comparativo", each FnNormalizeSpaces(_), type text},
 
@@ -1391,7 +1391,7 @@ let
         {"Actividad", each FnCleanText(_), type text}, 
         {"Subcapitulo", each FnCleanText(_), type text}, 
         {"Ins", each FnCleanText(_), type text}, 
-        {"# CC - Comparativo", each FnCleanText(FnNormalizeSpaces(_)), type text}, 
+        {"# CC - Comparativo", each FnCleanText(F_Globales[FnNormalizeComparativo](_)), type text}, 
         {"Valor Total ppto (CC)", each try Number.From(_) otherwise null, type number}, 
         {"V/U ppto (CC)", each try Number.From(_) otherwise null, type number}
     }, null, MissingField.Ignore),
@@ -1611,6 +1611,20 @@ let
                         sinEspGuion = Text.Replace(Text.Replace(unido, " -", "-"), "- ", "-")
                     in if sinEspGuion = "" then null else sinEspGuion
             ) otherwise null,
+
+        // Clave canonica de "# CC - Comparativo": FnNormalizeSpaces + numero inicial a 3
+        // digitos ("31-MANO DE OBRA" -> "031-MANO DE OBRA", "5-X" -> "005-X"). Los usuarios
+        // escriben el mismo comparativo con y sin ceros a la izquierda en Det_CC,
+        // aprobaciones y descargas, y las dinamicas agrupan por el texto exacto.
+        FnNormalizeComparativo = (t as any) as nullable text =>
+            let
+                s = FnNormalizeSpaces(t),
+                pre = if s = null or not Text.Contains(s, "-") then null else Text.BeforeDelimiter(s, "-"),
+                esNum = pre <> null and pre <> "" and Text.Remove(pre, {"0".."9"}) = ""
+            in
+                if esNum and Text.Length(pre) < 3
+                then Text.PadStart(pre, 3, "0") & "-" & Text.AfterDelimiter(s, "-")
+                else s,
 
         // Decodifica un binario HTML/texto de los reportes SINCO detectando la codificacion:
         // intenta UTF-8 y, si el resultado trae el caracter de reemplazo U+FFFD (tipico de
