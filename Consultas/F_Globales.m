@@ -608,6 +608,18 @@ let
                                     else desdeDesc
                     in FnAplicarOverrideSubcap(elegido), type text),
 
+                // Cola CRUDA de la descripcion (antes de overrides/canonicos: "GEN",
+                // "SALON SOCIA", "APTOS (U", "URBANISMO"): es el texto que realmente
+                // esta en el nombre y el que hay que quitar antes de anexar el canonico,
+                // si no el nombre queda "X - GEN - GENERALES".
+                ItemsConSubcapCrudo = Table.AddColumn(ItemsConSubcapDerivado, "SubcapCrudo", each
+                    let
+                        subcapSeg = if [Subcapitulo] = null then "" else Text.Trim(Text.From([Subcapitulo])),
+                        descRaw   = Text.Trim(Text.Replace(Text.From(if [DescActRaw] = null then "" else [DescActRaw]), "#(00A0)", " ")),
+                        descTxt   = Text.Combine(List.Select(Text.Split(descRaw, " "), each _ <> ""), " ")
+                    in if TieneSubcapExplicito or subcapSeg <> "" or descTxt = "" or [SubcapDerivado] = null then null
+                       else FnExtraerSubcapDeTexto(descTxt), type text),
+
                 // Canonicaliza subcapitulos derivados TRUNCADOS por el reporte (SINCO corta
                 // el texto en algunas filas: "ELE", "ELEC", "ELECTRIC" en vez de "ELECTRICO";
                 // "SALON SOCIA" en vez de "SALON SOCIAL"). Regla: si un valor derivado es
@@ -631,7 +643,7 @@ let
                                  else List.Accumulate(cands, null, (s, c) => if s = null or Text.Length(c[Norm]) > Text.Length(s[Norm]) then c else s)
                     in if mejor = null then v else mejor[V],
 
-                ItemsWithActividad = Table.AddColumn(ItemsConSubcapDerivado, "Actividad", each
+                ItemsWithActividad = Table.AddColumn(ItemsConSubcapCrudo, "Actividad", each
                     let
                         codTxt        = if [Codigo act]  = null then "" else [Codigo act],
                         // Prioridad: primero la descripcion real de SEGUIMIENTO (misma fuente
@@ -656,6 +668,7 @@ let
                         // caracter por caracter aunque se vean iguales).
                         subcapFuenteSeg = if [Subcapitulo] = null then "" else Text.Trim(Text.From([Subcapitulo])),
                         subcapFuente  = if subcapFuenteSeg <> "" then subcapFuenteSeg
+                                        else if [SubcapCrudo] <> null then [SubcapCrudo]
                                         else Text.From(if [SubcapDerivado] = null then "" else [SubcapDerivado]),
                         subcapRaw     = Text.Trim(Text.Replace(subcapFuente, "#(00A0)", " ")),
                         subcapTxt     = Text.Combine(List.Select(Text.Split(subcapRaw, " "), each _ <> ""), " "),
@@ -668,7 +681,7 @@ let
                         // hace sobre el texto ORIGINAL para no alterar su capitalizacion real.
                         conGuion      = if subcapTxt = "" then "" else " - " & subcapTxt,
                         nombreRealUpper = Text.Upper(nombreReal),
-                        posConGuion   = if conGuion = "" then -1 else Text.PositionOf(nombreRealUpper, Text.Upper(conGuion)),
+                        posConGuion   = if conGuion = "" then -1 else Text.PositionOf(nombreRealUpper, Text.Upper(conGuion), Occurrence.Last),
                         posSubcap     = if subcapTxt = "" then -1 else Text.PositionOf(nombreRealUpper, Text.Upper(subcapTxt)),
                         nombreSinSub  = if subcapTxt = "" then nombreReal
                                         else if posConGuion >= 0 then Text.RemoveRange(nombreReal, posConGuion, Text.Length(conGuion))

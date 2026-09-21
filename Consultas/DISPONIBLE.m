@@ -91,9 +91,42 @@ let
     // ============================================================
     DetCC_JoinPPTOBlock = Table.NestedJoin(DetCC_ConNorm, {"Centro de Costos", "Capitulo", "ActNorm", "SubcapNorm", "InsNorm"}, PPTO_Grouped_Buffer, {"Centro de Costos", "Capitulo", "ActNorm", "SubcapNorm", "InsNorm"}, "PPTOBlock", JoinKind.LeftOuter),
     DetCC_Expanded = Table.ExpandTableColumn(DetCC_JoinPPTOBlock, "PPTOBlock", {"Codigo act", "Actividad", "Subcapitulo", "Ins_Oficial", "ValorTotal_PPTO_Bloque", "Unitario_PPTO_Bloque"}, {"Codigo act", "Act_Oficial", "Subcap_Oficial", "Ins_Oficial", "ValorTotal_PPTO_Bloque", "Unitario_PPTO_Bloque"}),
+    // Respaldo por CODIGO de actividad (2026-09-21): si el nombre no cruzo (subcapitulo
+    // truncado en el reporte, texto distinto), se busca por CC + codigo + insumo; y si el
+    // insumo tambien difiere (SINCO lo renombro), por CC + codigo cuando esa actividad
+    // tiene UN solo renglon en el ppto. Sin esto la descarga no descuenta del ppto y el
+    // valor queda doble (adjudicado + por adjudicar completo).
+    FnCodNom = (a as any) as text =>
+        let
+            t0 = try Text.Trim(Text.From(a)) otherwise "",
+            t = if t0 = null then "" else t0,
+            pre = if t = "" then "" else Text.Trim(Text.BeforeDelimiter(t, "-"))
+        in if pre <> "" and Text.Remove(pre, {"0".."9", "."}) = "" then pre else "",
+    PPTO_ConCod = Table.AddColumn(PPTO_Grouped_Buffer, "CodNom", each FnCodNom([Actividad]), type text),
+    IdxCodIns = Table.Buffer(Table.SelectRows(Table.Group(PPTO_ConCod, {"Centro de Costos", "CodNom", "InsNorm"},
+        {{"__N", each Table.RowCount(_), Int64.Type}, {"__Blk", each _{0}, type record}}), each [CodNom] <> "" and [__N] = 1)),
+    IdxCod = Table.Buffer(Table.SelectRows(Table.Group(PPTO_ConCod, {"Centro de Costos", "CodNom"},
+        {{"__N", each Table.RowCount(_), Int64.Type}, {"__Blk", each _{0}, type record}}), each [CodNom] <> "" and [__N] = 1)),
+    DetCC_ConCod = Table.AddColumn(DetCC_Expanded, "CodNom", each FnCodNom([Actividad]), type text),
+    DetCC_J2 = Table.NestedJoin(DetCC_ConCod, {"Centro de Costos", "CodNom", "InsNorm"}, IdxCodIns, {"Centro de Costos", "CodNom", "InsNorm"}, "__R2", JoinKind.LeftOuter),
+    DetCC_J3 = Table.NestedJoin(DetCC_J2, {"Centro de Costos", "CodNom"}, IdxCod, {"Centro de Costos", "CodNom"}, "__R3", JoinKind.LeftOuter),
+    DetCC_Resuelto = Table.FromRecords(Table.TransformRows(DetCC_J3, (r) =>
+        let
+            base = Record.RemoveFields(r, {"__R2", "__R3", "CodNom"}),
+            blk = if r[Act_Oficial] <> null then null
+                  else if not Table.IsEmpty(r[__R2]) then r[__R2]{0}[__Blk]
+                  else if not Table.IsEmpty(r[__R3]) then r[__R3]{0}[__Blk]
+                  else null
+        in
+            if blk = null then base
+            else base & [
+                #"Codigo act" = blk[#"Codigo act"], Act_Oficial = blk[Actividad], Subcap_Oficial = blk[Subcapitulo],
+                Ins_Oficial = blk[Ins_Oficial], ValorTotal_PPTO_Bloque = blk[ValorTotal_PPTO_Bloque],
+                Unitario_PPTO_Bloque = blk[Unitario_PPTO_Bloque]])),
+
     // Adoptar los nombres OFICIALES del ppto cuando hubo match, para que el
     // Cruce 2 (que une por texto) siempre coincida.
-    DetCC_WithFinalIns0 = Table.AddColumn(DetCC_Expanded, "Ins_Final", each if [Ins_Oficial] <> null then [Ins_Oficial] else [Ins], type text),
+    DetCC_WithFinalIns0 = Table.AddColumn(DetCC_Resuelto, "Ins_Final", each if [Ins_Oficial] <> null then [Ins_Oficial] else [Ins], type text),
     DetCC_WithFinalIns1 = Table.AddColumn(DetCC_WithFinalIns0, "Act_Final", each if [Act_Oficial] <> null then [Act_Oficial] else [ActClave], type text),
     DetCC_WithFinalIns = Table.AddColumn(DetCC_WithFinalIns1, "Subcap_Final", each if [Act_Oficial] <> null then [Subcap_Oficial] else [SubcapClave], type text),
 
