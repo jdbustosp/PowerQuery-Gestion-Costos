@@ -90,12 +90,15 @@ let
     FiltroTipoValido = Table.Buffer(Table.SelectRows(LlavesLimpias, each [Tipo] <> null and [Tipo] <> "")),
 
     // 🚀 Lookup por Record para Clasificadores (O(1) por fila en vez de JOIN O(N))
-    ClasificadorRows = Table.SelectRows(
-        Table.Distinct(
+    // Primero se filtran las filas CON clasificador y despues se deja una por llave:
+    // al reves, Table.Distinct se quedaba con la primera fila de cada llave (casi
+    // siempre ITEMS/PPTO, sin clasificador) y el de Det_CC se perdia.
+    ClasificadorRows = Table.Distinct(
+        Table.SelectRows(
             Table.SelectColumns(FiltroTipoValido, {"Centro de Costos", "Codigo act", "Ins", "Clasificador"}, MissingField.Ignore),
-            {"Centro de Costos", "Codigo act", "Ins"}
+            each try ([Clasificador] <> null and Text.Trim(Text.From([Clasificador])) <> "") otherwise false
         ),
-        each try ([Clasificador] <> null and Text.Trim(Text.From([Clasificador])) <> "") otherwise false
+        {"Centro de Costos", "Codigo act", "Ins"}
     ),
     ClasificadorKeys = List.Transform(Table.ToRecords(Table.SelectColumns(ClasificadorRows, {"Centro de Costos", "Codigo act", "Ins"})), each [Centro de Costos] & "|" & [Codigo act] & "|" & [Ins]),
     ClasificadorMap = Record.FromList(ClasificadorRows[Clasificador], ClasificadorKeys),
@@ -277,7 +280,9 @@ let
         // Agregadas 2026-09-21: presupuesto descargado por comparativo (filas
         // ADJUDICADO/POR ADJUDICAR de DISPONIBLE), para comparar ppto vs aprobado
         // en la dinamica de comparativos.
-        "Cantidad ppto (CC)", "V/U ppto (CC)"
+        "Cantidad ppto (CC)", "V/U ppto (CC)",
+        // Vuelve 2026-09-21 a pedido del usuario (se calcula en BaseClasificada desde Det_CC).
+        "Clasificador"
     },
     // ============================================================
     // RELLENO DE SUBCAPITULO (2026-09-04): muchas filas (COMPRAS, CONTRATO, CC,
