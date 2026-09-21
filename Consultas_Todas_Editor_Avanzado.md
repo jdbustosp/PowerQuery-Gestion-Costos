@@ -457,7 +457,38 @@ let
         Table.RemoveColumns(RellenoCalc, {"Subcapitulo", "subcapAct", "__CodKey", "__ListaSubcaps"}, MissingField.Ignore),
         {{"__SubcapFill", "Subcapitulo"}}),
 
-    RellenoConPpto = Table.RenameColumns(RellenoFinal, {{"Cantidad_Calc", "Cantidad ppto (CC)"}}, MissingField.Ignore),
+    // ============================================================
+    // NOMBRE UNICO POR ACTIVIDAD (2026-09-21): la misma actividad llegaba con
+    // textos distintos segun la fuente (Det_CC con " - TORRES", ppto sin el, etc.)
+    // y salia duplicada en las dinamicas. Cada fila toma el nombre OFICIAL del
+    // presupuesto (filas PPTO/ITEMS) de su Centro de Costos + codigo de actividad.
+    // Solo se aplica cuando ese codigo tiene UN unico nombre en el ppto; si tiene
+    // varios (el mismo codigo en distintos subcapitulos), se deja cada fila como viene.
+    // ============================================================
+    FnCodDeNombre = (act as any, cod as any) as text =>
+        let
+            a = FnTextoODef(act),
+            pre = if a = "" then "" else FnTextoODef(Text.BeforeDelimiter(a, "-")),
+            esCodigo = pre <> "" and Text.Remove(pre, {"0".."9", "."}) = ""
+        in if esCodigo then pre else FnTextoODef(cod),
+    BaseNombres = Table.Buffer(Table.AddColumn(RellenoFinal, "__CodNom",
+        each FnCodDeNombre([Actividad], [Codigo act]), type text)),
+    NombresOficiales = Table.Buffer(Table.SelectRows(Table.Group(
+        Table.SelectRows(BaseNombres, each ([Tipo] = "PPTO" or [Tipo] = "ITEMS")
+            and [__CodNom] <> "" and FnTextoODef([Actividad]) <> ""),
+        {"Centro de Costos", "__CodNom"},
+        {{"__Nombres", each List.Distinct(List.RemoveNulls([Actividad])), type list}}),
+        each List.Count([__Nombres]) = 1)),
+    UnirNombres = Table.ExpandTableColumn(
+        Table.NestedJoin(BaseNombres, {"Centro de Costos", "__CodNom"}, NombresOficiales, {"Centro de Costos", "__CodNom"}, "__NO", JoinKind.LeftOuter),
+        "__NO", {"__Nombres"}),
+    ActUnificada0 = Table.AddColumn(UnirNombres, "__ActFinal",
+        each if [__Nombres] <> null then [__Nombres]{0} else [Actividad], type text),
+    ActUnificada = Table.RenameColumns(
+        Table.RemoveColumns(ActUnificada0, {"Actividad", "__CodNom", "__Nombres"}),
+        {{"__ActFinal", "Actividad"}}),
+
+    RellenoConPpto = Table.RenameColumns(ActUnificada, {{"Cantidad_Calc", "Cantidad ppto (CC)"}}, MissingField.Ignore),
     FinalRecortada = Table.SelectColumns(RellenoConPpto, ColumnasFinalesArboleda, MissingField.UseNull),
 
     TablaMaestraFinal = Table.Buffer(FinalRecortada)
@@ -1376,8 +1407,20 @@ let
     PPTO_WithStdIns = Table.AddColumn(PPTO_Typed, "InsNorm", each FnRemoveAccentsSymbols([Ins]), type text),
     // Claves normalizadas (sin tildes) para el cruce con descargas: el seguimiento
     // trae "SALON SOCIAL" con tilde y las descargas sin ella (o viceversa).
+    // Desde 2026-09-21 el nombre de la actividad del ppto CONSERVA el subcapitulo
+    // ("5.02-LADRILLO DE FACHADA - TORRES (UN)"). La clave del cruce se arma con el
+    // nombre SIN subcapitulo (igual que ActClave del lado descargas), y solo se recorta
+    // cuando la cola del nombre ES el subcapitulo de esa fila: en proyectos cuyo nombre
+    // no lo trae, la clave queda como siempre.
+    FnSepararSubcapPP = F_Globales[FnSepararSubcapDeNombre],
+    FnActClavePPTO = (act as nullable text, sub as nullable text) as nullable text =>
+        let
+            sep = if act = null then null else FnSepararSubcapPP(act),
+            subNorm = FnRemoveAccentsSymbols(if sub = null then "" else sub),
+            sepNorm = if sep = null or sep[Subcap] = null then null else FnRemoveAccentsSymbols(sep[Subcap])
+        in if sepNorm <> null and subNorm <> "" and sepNorm = subNorm then sep[Nombre] else act,
     PPTO_WithNorm = Table.AddColumn(Table.AddColumn(PPTO_WithStdIns,
-        "ActNorm", each FnRemoveAccentsSymbols([Actividad]), type text),
+        "ActNorm", each FnRemoveAccentsSymbols(FnActClavePPTO([Actividad], [Subcapitulo])), type text),
         "SubcapNorm", each FnRemoveAccentsSymbols(if [Subcapitulo] = null then "" else [Subcapitulo]), type text),
     PPTO_Grouped_Buffer = Table.Buffer(Table.Group(PPTO_WithNorm, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "InsNorm"}, {{"Ins_Oficial", each List.First(List.RemoveNulls([Ins])), type text}, {"ValorTotal_PPTO_Bloque", each List.Sum([VT Presupuesto]), type number}, {"Unitario_PPTO_Bloque", each List.First(List.RemoveNulls([#"V/U Presupuesto"])), type number}, {"ActNorm", each List.First(List.RemoveNulls([ActNorm])), type text}, {"SubcapNorm", each List.First([SubcapNorm]), type text}})),
 
@@ -1472,7 +1515,7 @@ let
     
     // Subcapitulo embebido en el nombre (proyectos tipo TURPIAL): las filas que
     // llegan sin Subcapitulo pero con el patron "ACTIVIDAD - SUBCAP (UM)" en el
-    // nombre lo derivan con el helper compartido, y el nombre queda limpio.
+    // nombre lo derivan con el helper compartido.
     FnSepararSubcap = F_Globales[FnSepararSubcapDeNombre],
     ConSubcapDerivado0 = Table.AddColumn(UnionFiltered, "__Sep", each
         let s = if [Subcapitulo] = null then "" else Text.Trim(Text.From([Subcapitulo]))
@@ -1481,8 +1524,8 @@ let
         let s = if [Subcapitulo] = null then "" else Text.Trim(Text.From([Subcapitulo]))
         in if s <> "" then FnOverrideSubcapDD([Subcapitulo])
            else if [__Sep] <> null then [__Sep][Subcap] else null, type text),
-    ConSubcapDerivado2 = Table.AddColumn(ConSubcapDerivado1, "ActividadFinal", each
-        if [__Sep] <> null and [__Sep][Subcap] <> null then [__Sep][Nombre] else [Actividad], type text),
+    // El nombre se deja tal cual (con su subcapitulo); solo se deriva la columna.
+    ConSubcapDerivado2 = Table.AddColumn(ConSubcapDerivado1, "ActividadFinal", each [Actividad], type text),
     ConSubcapDerivado = Table.RenameColumns(
         Table.RemoveColumns(ConSubcapDerivado2, {"Subcapitulo", "Actividad", "__Sep"}),
         {{"SubcapFinal", "Subcapitulo"}, {"ActividadFinal", "Actividad"}}),
@@ -2184,8 +2227,17 @@ let
                         //    vienen asi de crudo en el reporte (ver funciones mas arriba).
                         nombreSinUnidad  = FnQuitarUnidadEmbebida(nombreColapsado, umTxt),
                         nombreLimpio  = FnQuitarGuionInicial(FnQuitarGuionColgante(nombreSinUnidad)),
-                        actTxt        = if umTxt = "" then codTxt & "-" & nombreLimpio
-                                        else codTxt & "-" & nombreLimpio & " (" & umTxt & ")"
+                        // Subcapitulo DERIVADO del nombre (proyectos sin filas SUBCAPITULO,
+                        // tipo Turpial): el nombre de la actividad lo conserva tal como viene
+                        // en el reporte ("5.02-LADRILLO DE FACHADA - TORRES (UN)"), con el
+                        // valor canonico. Asi coincide con Det_CC, descargas y aprobaciones, y
+                        // la actividad no aparece duplicada con y sin subcapitulo.
+                        subcapEnNombre = if subcapFuenteSeg = "" and [SubcapDerivado] <> null
+                                         then FnCanonSubcap([SubcapDerivado]) else null,
+                        cuerpo        = if subcapEnNombre = null then nombreLimpio
+                                        else nombreLimpio & " - " & subcapEnNombre,
+                        actTxt        = if umTxt = "" then codTxt & "-" & cuerpo
+                                        else codTxt & "-" & cuerpo & " (" & umTxt & ")"
                     in actTxt, type text),
 
                 // Unifica el Subcapitulo: el explicito del SEGUIMIENTO gana; si no hay,

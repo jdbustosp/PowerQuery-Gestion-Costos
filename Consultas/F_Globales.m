@@ -684,8 +684,17 @@ let
                         //    vienen asi de crudo en el reporte (ver funciones mas arriba).
                         nombreSinUnidad  = FnQuitarUnidadEmbebida(nombreColapsado, umTxt),
                         nombreLimpio  = FnQuitarGuionInicial(FnQuitarGuionColgante(nombreSinUnidad)),
-                        actTxt        = if umTxt = "" then codTxt & "-" & nombreLimpio
-                                        else codTxt & "-" & nombreLimpio & " (" & umTxt & ")"
+                        // Subcapitulo DERIVADO del nombre (proyectos sin filas SUBCAPITULO,
+                        // tipo Turpial): el nombre de la actividad lo conserva tal como viene
+                        // en el reporte ("5.02-LADRILLO DE FACHADA - TORRES (UN)"), con el
+                        // valor canonico. Asi coincide con Det_CC, descargas y aprobaciones, y
+                        // la actividad no aparece duplicada con y sin subcapitulo.
+                        subcapEnNombre = if subcapFuenteSeg = "" and [SubcapDerivado] <> null
+                                         then FnCanonSubcap([SubcapDerivado]) else null,
+                        cuerpo        = if subcapEnNombre = null then nombreLimpio
+                                        else nombreLimpio & " - " & subcapEnNombre,
+                        actTxt        = if umTxt = "" then codTxt & "-" & cuerpo
+                                        else codTxt & "-" & cuerpo & " (" & umTxt & ")"
                     in actTxt, type text),
 
                 // Unifica el Subcapitulo: el explicito del SEGUIMIENTO gana; si no hay,

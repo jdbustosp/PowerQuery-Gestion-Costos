@@ -348,7 +348,38 @@ let
         Table.RemoveColumns(RellenoCalc, {"Subcapitulo", "subcapAct", "__CodKey", "__ListaSubcaps"}, MissingField.Ignore),
         {{"__SubcapFill", "Subcapitulo"}}),
 
-    RellenoConPpto = Table.RenameColumns(RellenoFinal, {{"Cantidad_Calc", "Cantidad ppto (CC)"}}, MissingField.Ignore),
+    // ============================================================
+    // NOMBRE UNICO POR ACTIVIDAD (2026-09-21): la misma actividad llegaba con
+    // textos distintos segun la fuente (Det_CC con " - TORRES", ppto sin el, etc.)
+    // y salia duplicada en las dinamicas. Cada fila toma el nombre OFICIAL del
+    // presupuesto (filas PPTO/ITEMS) de su Centro de Costos + codigo de actividad.
+    // Solo se aplica cuando ese codigo tiene UN unico nombre en el ppto; si tiene
+    // varios (el mismo codigo en distintos subcapitulos), se deja cada fila como viene.
+    // ============================================================
+    FnCodDeNombre = (act as any, cod as any) as text =>
+        let
+            a = FnTextoODef(act),
+            pre = if a = "" then "" else FnTextoODef(Text.BeforeDelimiter(a, "-")),
+            esCodigo = pre <> "" and Text.Remove(pre, {"0".."9", "."}) = ""
+        in if esCodigo then pre else FnTextoODef(cod),
+    BaseNombres = Table.Buffer(Table.AddColumn(RellenoFinal, "__CodNom",
+        each FnCodDeNombre([Actividad], [Codigo act]), type text)),
+    NombresOficiales = Table.Buffer(Table.SelectRows(Table.Group(
+        Table.SelectRows(BaseNombres, each ([Tipo] = "PPTO" or [Tipo] = "ITEMS")
+            and [__CodNom] <> "" and FnTextoODef([Actividad]) <> ""),
+        {"Centro de Costos", "__CodNom"},
+        {{"__Nombres", each List.Distinct(List.RemoveNulls([Actividad])), type list}}),
+        each List.Count([__Nombres]) = 1)),
+    UnirNombres = Table.ExpandTableColumn(
+        Table.NestedJoin(BaseNombres, {"Centro de Costos", "__CodNom"}, NombresOficiales, {"Centro de Costos", "__CodNom"}, "__NO", JoinKind.LeftOuter),
+        "__NO", {"__Nombres"}),
+    ActUnificada0 = Table.AddColumn(UnirNombres, "__ActFinal",
+        each if [__Nombres] <> null then [__Nombres]{0} else [Actividad], type text),
+    ActUnificada = Table.RenameColumns(
+        Table.RemoveColumns(ActUnificada0, {"Actividad", "__CodNom", "__Nombres"}),
+        {{"__ActFinal", "Actividad"}}),
+
+    RellenoConPpto = Table.RenameColumns(ActUnificada, {{"Cantidad_Calc", "Cantidad ppto (CC)"}}, MissingField.Ignore),
     FinalRecortada = Table.SelectColumns(RellenoConPpto, ColumnasFinalesArboleda, MissingField.UseNull),
 
     TablaMaestraFinal = Table.Buffer(FinalRecortada)

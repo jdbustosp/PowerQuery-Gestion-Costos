@@ -30,8 +30,20 @@ let
     PPTO_WithStdIns = Table.AddColumn(PPTO_Typed, "InsNorm", each FnRemoveAccentsSymbols([Ins]), type text),
     // Claves normalizadas (sin tildes) para el cruce con descargas: el seguimiento
     // trae "SALON SOCIAL" con tilde y las descargas sin ella (o viceversa).
+    // Desde 2026-09-21 el nombre de la actividad del ppto CONSERVA el subcapitulo
+    // ("5.02-LADRILLO DE FACHADA - TORRES (UN)"). La clave del cruce se arma con el
+    // nombre SIN subcapitulo (igual que ActClave del lado descargas), y solo se recorta
+    // cuando la cola del nombre ES el subcapitulo de esa fila: en proyectos cuyo nombre
+    // no lo trae, la clave queda como siempre.
+    FnSepararSubcapPP = F_Globales[FnSepararSubcapDeNombre],
+    FnActClavePPTO = (act as nullable text, sub as nullable text) as nullable text =>
+        let
+            sep = if act = null then null else FnSepararSubcapPP(act),
+            subNorm = FnRemoveAccentsSymbols(if sub = null then "" else sub),
+            sepNorm = if sep = null or sep[Subcap] = null then null else FnRemoveAccentsSymbols(sep[Subcap])
+        in if sepNorm <> null and subNorm <> "" and sepNorm = subNorm then sep[Nombre] else act,
     PPTO_WithNorm = Table.AddColumn(Table.AddColumn(PPTO_WithStdIns,
-        "ActNorm", each FnRemoveAccentsSymbols([Actividad]), type text),
+        "ActNorm", each FnRemoveAccentsSymbols(FnActClavePPTO([Actividad], [Subcapitulo])), type text),
         "SubcapNorm", each FnRemoveAccentsSymbols(if [Subcapitulo] = null then "" else [Subcapitulo]), type text),
     PPTO_Grouped_Buffer = Table.Buffer(Table.Group(PPTO_WithNorm, {"Centro de Costos", "Codigo act", "Capitulo", "Actividad", "Subcapitulo", "InsNorm"}, {{"Ins_Oficial", each List.First(List.RemoveNulls([Ins])), type text}, {"ValorTotal_PPTO_Bloque", each List.Sum([VT Presupuesto]), type number}, {"Unitario_PPTO_Bloque", each List.First(List.RemoveNulls([#"V/U Presupuesto"])), type number}, {"ActNorm", each List.First(List.RemoveNulls([ActNorm])), type text}, {"SubcapNorm", each List.First([SubcapNorm]), type text}})),
 
@@ -126,7 +138,7 @@ let
     
     // Subcapitulo embebido en el nombre (proyectos tipo TURPIAL): las filas que
     // llegan sin Subcapitulo pero con el patron "ACTIVIDAD - SUBCAP (UM)" en el
-    // nombre lo derivan con el helper compartido, y el nombre queda limpio.
+    // nombre lo derivan con el helper compartido.
     FnSepararSubcap = F_Globales[FnSepararSubcapDeNombre],
     ConSubcapDerivado0 = Table.AddColumn(UnionFiltered, "__Sep", each
         let s = if [Subcapitulo] = null then "" else Text.Trim(Text.From([Subcapitulo]))
@@ -135,8 +147,8 @@ let
         let s = if [Subcapitulo] = null then "" else Text.Trim(Text.From([Subcapitulo]))
         in if s <> "" then FnOverrideSubcapDD([Subcapitulo])
            else if [__Sep] <> null then [__Sep][Subcap] else null, type text),
-    ConSubcapDerivado2 = Table.AddColumn(ConSubcapDerivado1, "ActividadFinal", each
-        if [__Sep] <> null and [__Sep][Subcap] <> null then [__Sep][Nombre] else [Actividad], type text),
+    // El nombre se deja tal cual (con su subcapitulo); solo se deriva la columna.
+    ConSubcapDerivado2 = Table.AddColumn(ConSubcapDerivado1, "ActividadFinal", each [Actividad], type text),
     ConSubcapDerivado = Table.RenameColumns(
         Table.RemoveColumns(ConSubcapDerivado2, {"Subcapitulo", "Actividad", "__Sep"}),
         {{"SubcapFinal", "Subcapitulo"}, {"ActividadFinal", "Actividad"}}),
