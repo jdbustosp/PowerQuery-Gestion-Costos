@@ -51,9 +51,23 @@ let
 
     Typed = Table.TransformColumnTypes(Relevant, {{"TimeLastModified", type datetimezone}, {"Length", Int64.Type}}, "en-US"),
     Sorted = Table.Sort(Typed, {{"Name", Order.Ascending}, {"FileName", Order.Ascending}, {"TimeLastModified", Order.Descending}}),
-    Final = Table.Buffer(Table.RenameColumns(
+    Resultado = Table.Buffer(Table.RenameColumns(
         Table.SelectColumns(Sorted, {"Name", "FileName", "ServerRelativeUrl", "TimeLastModified", "Length"}),
         {{"Name", "Centro de Costos"}, {"FileName", "Name"}}
-    ))
+    )),
+
+    // Sin reportes, COMPRAS/CONTRATOS/BD fallan mas abajo con un error opaco
+    // ("The column 'Centro de Costos' of the table wasn't found"). Se corta aqui
+    // con un mensaje que dice que proyecto y que carpeta se buscaron.
+    CarpetasVistas = Text.Combine(List.Transform(Table.Column(CCFolders, "Name"), Text.From), ", "),
+    Final =
+        if Table.IsEmpty(Resultado) then
+            error Error.Record(
+                "Sin reportes SINCO",
+                "No se encontraron reportes SINCO para ProyectoActual = """ & ParamProyecto &
+                """. Verifique que el parametro ProyectoActual del libro corresponda a este proyecto " &
+                "y que los reportes esten en: " & BasePath & "/<Centro de Costos>/Actual",
+                "Carpetas de CC encontradas: " & (if CarpetasVistas = "" then "(ninguna)" else CarpetasVistas))
+        else Resultado
 in
     Final
