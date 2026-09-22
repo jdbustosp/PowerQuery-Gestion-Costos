@@ -107,15 +107,32 @@ let
         {{"__N", each Table.RowCount(_), Int64.Type}, {"__Blk", each _{0}, type record}}), each [CodNom] <> "" and [__N] = 1)),
     IdxCod = Table.Buffer(Table.SelectRows(Table.Group(PPTO_ConCod, {"Centro de Costos", "CodNom"},
         {{"__N", each Table.RowCount(_), Int64.Type}, {"__Blk", each _{0}, type record}}), each [CodNom] <> "" and [__N] = 1)),
+    // Nivel 4: SINCO a veces le AGREGA texto al insumo ("MDO VIGA CIMENTACION ... CONCRETO (M3)"
+    // pasa a "... CONCRETO (NO INCLUYE FORMALETA) (M3)"). Si el insumo de la descarga, sin la
+    // unidad final, es el comienzo del de UN SOLO renglon de esa actividad, se cruza con ese.
+    FnInsBase = (t as any) as text =>
+        let
+            s0 = try Text.Upper(Text.Trim(Text.From(t))) otherwise "",
+            s = if s0 = null then "" else s0,
+            sinUM = if Text.EndsWith(s, ")") and Text.Contains(s, " (")
+                    then Text.Trim(Text.BeforeDelimiter(s, " (", {0, RelativePosition.FromEnd})) else s
+        in sinUM,
+    IdxCodTodos = Table.Buffer(Table.Group(Table.SelectRows(PPTO_ConCod, each [CodNom] <> ""), {"Centro de Costos", "CodNom"},
+        {{"__Blks", each Table.ToRecords(Table.AddColumn(_, "__InsBase", (x) => FnInsBase(x[InsNorm]))), type list}})),
     DetCC_ConCod = Table.AddColumn(DetCC_Expanded, "CodNom", each FnCodNom([Actividad]), type text),
     DetCC_J2 = Table.NestedJoin(DetCC_ConCod, {"Centro de Costos", "CodNom", "InsNorm"}, IdxCodIns, {"Centro de Costos", "CodNom", "InsNorm"}, "__R2", JoinKind.LeftOuter),
     DetCC_J3 = Table.NestedJoin(DetCC_J2, {"Centro de Costos", "CodNom"}, IdxCod, {"Centro de Costos", "CodNom"}, "__R3", JoinKind.LeftOuter),
-    DetCC_Resuelto = Table.FromRecords(Table.TransformRows(DetCC_J3, (r) =>
+    DetCC_J4 = Table.NestedJoin(DetCC_J3, {"Centro de Costos", "CodNom"}, IdxCodTodos, {"Centro de Costos", "CodNom"}, "__R4", JoinKind.LeftOuter),
+    DetCC_Resuelto = Table.FromRecords(Table.TransformRows(DetCC_J4, (r) =>
         let
-            base = Record.RemoveFields(r, {"__R2", "__R3", "CodNom"}),
+            base = Record.RemoveFields(r, {"__R2", "__R3", "__R4", "CodNom"}),
+            insBase = FnInsBase(r[InsNorm]),
+            candPref = if Table.IsEmpty(r[__R4]) or Text.Length(insBase) < 10 then {}
+                       else List.Select(r[__R4]{0}[__Blks], each Text.StartsWith(_[__InsBase], insBase) or Text.StartsWith(insBase, _[__InsBase])),
             blk = if r[Act_Oficial] <> null then null
                   else if not Table.IsEmpty(r[__R2]) then r[__R2]{0}[__Blk]
                   else if not Table.IsEmpty(r[__R3]) then r[__R3]{0}[__Blk]
+                  else if List.Count(candPref) = 1 then candPref{0}
                   else null
         in
             if blk = null then base
