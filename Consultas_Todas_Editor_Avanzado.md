@@ -3027,3 +3027,226 @@ in
     Resultado
 
 ```
+
+## SINCO_FACTURAS
+
+```powerquery
+let
+    // SINCO_FACTURAS (2026-10-05): facturas de SINCO por OC/contrato, desde los informes
+    // "Informe relacion de pagos - pagos" (actas de contratos, valor Total = neto + IVA) y
+    // "<centro> - Facturacion de entradas y actas" (entradas de almacen facturadas, Valor Total).
+    // Los informes viven en <Reportes EDT>/<proyecto>/<centro>/Actual. Se leen aparte de
+    // SP_Archivos_Proyecto para no mezclarlos con los demas reportes.
+    FxToNumberFlex = F_Globales[FxToNumberFlex],
+    FnDecodeHtml = F_Globales[FnDecodeHtml],
+    FnBuildColumnas = F_Globales[FnBuildColumnas],
+    FnEncode = F_Globales[FnEncode],
+    ParamProyecto = Text.Trim(ProyectoActual),
+    SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
+    BasePath = "/sites/MiGerenciaViv/Departamento Tecnico/COORDINACION DE PRESUPUESTOS/0. Reportes EDT - Control costos interno/" & ParamProyecto,
+    FnTexto = (v as any) as text => let t = try Text.Trim(Text.From(v)) otherwise null in if t = null then "" else t,
+    FnDigitos = (v as any) as text => Text.Select(FnTexto(v), {"0".."9"}),
+    FnFactura = (v as any) as text =>
+        let t = Text.Select(Text.Upper(FnTexto(v)), {"A".."Z", "0".."9"}),
+            sinCeros = Text.TrimStart(t, "0")
+        in sinCeros,
+
+    CCFolders = try Table.RenameColumns(SP_CarpetasCC, {{"Centro de Costos", "Name"}}) otherwise #table({"Name"}, {}),
+    ConArchivos = Table.AddColumn(CCFolders, "Archivos", each
+        let r = try Json.Document(Web.Contents(SiteUrl, [
+                RelativePath = "/_api/web/GetFolderByServerRelativeUrl('" & FnEncode(BasePath & "/" & [Name] & "/Actual") & "')/Files",
+                Query = [#"$select" = "Name,ServerRelativeUrl"],
+                Headers = [Accept = "application/json;odata=nometadata"],
+                Timeout = #duration(0, 0, 2, 0)])) otherwise null
+        in if r <> null and Record.HasFields(r, "value") then Table.FromRecords(r[value], {"Name", "ServerRelativeUrl"}, MissingField.UseNull) else null),
+    Validos = Table.SelectRows(ConArchivos, each [Archivos] <> null),
+    Expandido = Table.ExpandTableColumn(Validos, "Archivos", {"Name", "ServerRelativeUrl"}, {"Archivo", "Url"}),
+    ConFuente = Table.AddColumn(Expandido, "Fuente", each
+        let n = Text.Upper([Archivo]) in
+        if Text.StartsWith(n, "~$") then null
+        else if Text.Contains(n, "RELACION DE PAGOS") or Text.Contains(n, "RELACI#(00D3)N DE PAGOS") then "Acta"
+        else if Text.Contains(n, "FACTURACION DE ENTRADAS") or Text.Contains(n, "FACTURACI#(00D3)N DE ENTRADAS") then "Entrada"
+        else null, type text),
+    Informes = Table.SelectRows(ConFuente, each [Fuente] <> null),
+
+    FnLeer = (url as text, fuente as text) as table =>
+        let
+            bin = Binary.Buffer(Web.Contents(SiteUrl, [
+                RelativePath = "/_api/web/GetFileByServerRelativeUrl('" & FnEncode(url) & "')/$value",
+                Headers = [Accept = "*/*"], Timeout = #duration(0, 0, 5, 0)])),
+            n = if fuente = "Acta" then 31 else 12,
+            raw = Html.Table(FnDecodeHtml(bin), FnBuildColumnas(n), [RowSelector = "tr"]),
+            filas =
+                if fuente = "Acta" then
+                    Table.SelectRows(raw, each FnDigitos([Columna 2]) <> "" and FnDigitos([Columna 2]) = FnTexto([Columna 2]))
+                else
+                    Table.SelectRows(raw, each FnDigitos([Columna 1]) <> "" and FnDigitos([Columna 1]) = FnTexto([Columna 1]) and FnDigitos([Columna 2]) = FnTexto([Columna 2])),
+            salida = Table.FromRecords(List.Transform(Table.ToRecords(filas), (r) =>
+                if fuente = "Acta" then [
+                    OC = FnDigitos(r[Columna 2]), Documento = "Acta " & FnTexto(r[Columna 5]),
+                    NIT = FnDigitos(r[Columna 4]), Factura = FnTexto(r[Columna 6]),
+                    Fecha = FnTexto(r[Columna 1]), Valor = FxToNumberFlex(r[Columna 13])]
+                else [
+                    OC = FnDigitos(r[Columna 1]), Documento = "EA " & FnTexto(r[Columna 2]),
+                    NIT = FnDigitos(r[Columna 3]), Factura = FnTexto(r[Columna 8]),
+                    Fecha = FnTexto(r[Columna 9]), Valor = FxToNumberFlex(r[Columna 11])]),
+                type table [OC = text, Documento = text, NIT = text, Factura = text, Fecha = text, Valor = number])
+        in salida,
+
+    Leidos = Table.AddColumn(Informes, "Datos", each try FnLeer([Url], [Fuente]) otherwise null),
+    ConDatos = Table.SelectRows(Leidos, each [Datos] <> null),
+    Filas = if Table.IsEmpty(ConDatos)
+        then #table(type table [Fuente = text, OC = text, Documento = text, NIT = text, Factura = text, Fecha = text, Valor = number], {})
+        else Table.ExpandTableColumn(Table.SelectColumns(ConDatos, {"Fuente", "Datos"}), "Datos",
+            {"OC", "Documento", "NIT", "Factura", "Fecha", "Valor"}),
+    // El mismo informe puede estar en varias carpetas de centro (informe por proyecto)
+    SinDuplicados = Table.Distinct(Filas, {"Fuente", "OC", "Documento", "Factura", "Valor"}),
+    ConClave = Table.AddColumn(SinDuplicados, "FacturaClave", each FnFactura([Factura]), type text),
+    Tipado = Table.TransformColumnTypes(ConClave, {{"Valor", type number}})
+in
+    Tipado
+```
+
+## TD3_OC
+
+```powerquery
+let
+    // TD3_OC (2026-10-05): dimension del modelo de datos de la dinamica de contratos/OC.
+    // Una fila por contrato u orden de compra de SINCO (filas CONTRATO/COMPRAS de BD).
+    // Tipo, centro de costos, clasificador y contratista son UNO por OC y se aplican a todas
+    // sus filas (comparativos, provisiones, descuentos): asi un segmentador trae la OC completa.
+    FnTexto = (v as any) as text => let t = try Text.Trim(Text.From(v)) otherwise null in if t = null then "" else t,
+    FnOC = (v as any) as text => Text.Select(FnTexto(v), {"0".."9"}),
+    FnModa = (l as list) as nullable text =>
+        let x = List.Select(List.Transform(l, FnTexto), each _ <> "") in if List.IsEmpty(x) then null else List.Mode(x),
+    Base = Table.Buffer(Table.SelectRows(
+        // Lee la TABLA BD ya cargada en la hoja: recalcular la consulta BD por cada tabla
+        // del modelo sumaba ~9 min a cada actualizacion.
+        Table.AddColumn(Table.SelectColumns(Excel.CurrentWorkbook(){[Name = "BD"]}[Content], {"Centro de Costos", "Tipo", "# OC / Contrato", "Nombre Contratista", "Clasificador"}), "OC", each FnOC([#"# OC / Contrato"]), type text),
+        each [OC] <> "")),
+    Sinco = Table.SelectRows(Base, each [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS"),
+    PorOC = Table.Group(Sinco, {"OC"}, {
+        {"Tipo", each if List.Contains([Tipo], "CONTRATO") then "Contrato" else "Orden de compra", type text},
+        {"Centro de Costos", each FnModa([Centro de Costos]), type text},
+        {"Contratista", each FnModa([Nombre Contratista]), type text}}),
+    // Clasificador: el mas frecuente entre TODAS las filas de la OC (BD ya lo trae desde aprobaciones)
+    ClasifOC = Table.Group(Base, {"OC"}, {{"Clasificador", each FnModa([Clasificador]), type text}}),
+    Unido = Table.ExpandTableColumn(Table.NestedJoin(PorOC, {"OC"}, ClasifOC, {"OC"}, "C", JoinKind.LeftOuter), "C", {"Clasificador"}),
+    Final = Table.TransformColumns(Unido, {
+        {"Clasificador", each if _ = null then "(sin clasificador)" else _, type text},
+        {"Contratista", each if _ = null then "(sin contratista)" else _, type text}})
+in
+    Final
+```
+
+## TD3_FACT_OC
+
+```powerquery
+let
+    // TD3_FACT_OC (2026-10-05): valores por contrato/OC para la dinamica de contratos/OC.
+    // Cada columna de BD solo tiene valor en su tipo de fila: VT Asegurada y VT Cortes en
+    // CONTRATO/COMPRAS, VR total aprobacion en CC (Det_CC), Valor descuento en DESCUENTO.
+    FnOC = (v as any) as text => let t = try Text.Trim(Text.From(v)) otherwise null in if t = null then "" else Text.Select(t, {"0".."9"}),
+    FnNum = (v as any) as number => let n = try Number.From(v) otherwise null in if n = null then 0 else n,
+    Base = Table.SelectRows(
+        // Lee la TABLA BD ya cargada en la hoja (ver TD3_OC)
+        Table.AddColumn(Table.SelectColumns(Excel.CurrentWorkbook(){[Name = "BD"]}[Content], {"# OC / Contrato", "VT Asegurada", "VR total aprobacion", "VT Cortes", "Valor descuento"}), "OC", each FnOC([#"# OC / Contrato"]), type text),
+        each [OC] <> ""),
+    PorOC = Table.Group(Base, {"OC"}, {
+        {"Asegurado", each List.Sum(List.Transform([VT Asegurada], FnNum)), type number},
+        {"Comparativos", each List.Sum(List.Transform([VR total aprobacion], FnNum)), type number},
+        {"Invertido", each List.Sum(List.Transform([VT Cortes], FnNum)), type number},
+        {"Descuentos", each List.Sum(List.Transform([Valor descuento], FnNum)), type number}}),
+    SoloOC = Table.Join(PorOC, {"OC"}, Table.SelectColumns(TD3_OC, {"OC"}), {"OC"}, JoinKind.Inner)
+in
+    SoloOC
+```
+
+## TD3_FACTURAS
+
+```powerquery
+let
+    // TD3_FACTURAS (2026-10-05): invertido por factura (actas y entradas facturadas de SINCO)
+    // para el nivel 4 de la dinamica de contratos/OC. Por cada OC se agrega una fila
+    // "(sin factura)" con lo invertido que aun no tiene factura (o la diferencia contra
+    // VT Cortes), para que las facturas siempre sumen el invertido de la OC.
+    Fact = Table.SelectRows(SINCO_FACTURAS, each [OC] <> ""),
+    PorFactura = Table.Group(Fact, {"OC", "FacturaClave"}, {
+        {"Factura", each List.First(List.Select([Factura], each _ <> "" and _ <> null), "(sin factura)"), type text},
+        {"Invertido", each List.Sum([Valor]), type number}}),
+    ConLlave = Table.AddColumn(PorFactura, "FactKey", each [OC] & "|" & (if [FacturaClave] = "" then "SIN" else [FacturaClave]), type text),
+    SoloOC = Table.Join(ConLlave, {"OC"}, Table.SelectColumns(TD3_OC, {"OC"}), {"OC"}, JoinKind.Inner),
+    // Cuadre contra el invertido de la OC (VT Cortes de BD)
+    SumaFact = Table.Group(SoloOC, {"OC"}, {{"Facturado", each List.Sum([Invertido]), type number}}),
+    Cuadre = Table.ExpandTableColumn(
+        Table.NestedJoin(Table.SelectColumns(TD3_FACT_OC, {"OC", "Invertido"}), {"OC"}, SumaFact, {"OC"}, "F", JoinKind.LeftOuter),
+        "F", {"Facturado"}),
+    Saldo = Table.SelectRows(
+        Table.AddColumn(Cuadre, "Dif", each [Invertido] - (if [Facturado] = null then 0 else [Facturado]), type number),
+        each Number.Abs([Dif]) >= 1),
+    FilasSaldo = Table.FromRecords(List.Transform(Table.ToRecords(Saldo), (r) =>
+        [OC = r[OC], FacturaClave = "", Factura = "(sin factura)", Invertido = r[Dif], FactKey = r[OC] & "|SIN"]),
+        type table [OC = text, FacturaClave = text, Factura = text, Invertido = number, FactKey = text]),
+    Todo = Table.Combine({Table.SelectColumns(SoloOC, {"OC", "FacturaClave", "Factura", "Invertido", "FactKey"}), FilasSaldo}),
+    Final = Table.Group(Todo, {"FactKey", "OC"}, {
+        {"Factura", each List.First([Factura]), type text},
+        {"Invertido", each List.Sum([Invertido]), type number}})
+in
+    Final
+```
+
+## TD3_PROV
+
+```powerquery
+let
+    // TD3_PROV (2026-10-05): provisiones (bruto con descuentos) por OC, factura y numero de
+    // provision, para la dinamica de contratos/OC. Se ubican en la OC que dice la provision;
+    // si esa OC no existe en SINCO pero NIT + factura si existen, en la OC de SINCO.
+    // Las demas (OC invalida y factura que no esta en SINCO) quedan fuera de la dinamica.
+    FnTexto = (v as any) as text => let t = try Text.Trim(Text.From(v)) otherwise null in if t = null then "" else t,
+    FnDigitos = (v as any) as text => Text.Select(FnTexto(v), {"0".."9"}),
+    FnNIT = (v as any) as text => let d = FnDigitos(v) in if Text.Length(d) = 10 and List.Contains({"8", "9"}, Text.Start(d, 1)) then Text.Start(d, 9) else d,
+    FnFactura = (v as any) as text => Text.TrimStart(Text.Select(Text.Upper(FnTexto(v)), {"A".."Z", "0".."9"}), "0"),
+    FnNum = (v as any) as number => let n = try Number.From(v) otherwise null in if n = null then 0 else n,
+    OCsValidas = List.Buffer(TD3_OC[OC]),
+    // NIT + factura -> OC segun SINCO
+    MapaSinco = let
+            t = Table.SelectRows(Table.AddColumn(SINCO_FACTURAS, "__K", each FnNIT([NIT]) & "|" & [FacturaClave], type text), each [FacturaClave] <> ""),
+            g = Table.Group(t, {"__K"}, {{"OC", each List.Mode([OC]), type text}})
+        in Record.FromList(g[OC], g[__K]),
+    Prov = Table.SelectColumns(PROVISIONES_SP, {"# OC / Contrato", "NIT", "No_Factura", "No_Prov", "VR_Bruto_con_desc"}, MissingField.UseNull),
+    ConCampos = Table.AddColumn(Prov, "R", each
+        let
+            ocProv = FnDigitos([#"# OC / Contrato"]),
+            clave = FnFactura([No_Factura]),
+            ocSinco = if clave = "" then null else Record.FieldOrDefault(MapaSinco, FnNIT([NIT]) & "|" & clave, null),
+            oc = if List.Contains(OCsValidas, ocProv) then ocProv else if ocSinco <> null and List.Contains(OCsValidas, ocSinco) then ocSinco else null
+        in [OC = oc, FacturaClave = clave, Factura = if clave = "" then "(sin factura)" else FnTexto([No_Factura])]),
+    Expandido = Table.ExpandRecordColumn(ConCampos, "R", {"OC", "FacturaClave", "Factura"}),
+    Ubicadas = Table.SelectRows(Expandido, each [OC] <> null),
+    Final = Table.FromRecords(List.Transform(Table.ToRecords(Ubicadas), (r) => [
+            FactKey = r[OC] & "|" & (if r[FacturaClave] = "" then "SIN" else r[FacturaClave]),
+            OC = r[OC], Factura = r[Factura],
+            No_Prov = try Int64.From(Number.From(r[No_Prov])) otherwise null,
+            Bruto = FnNum(r[VR_Bruto_con_desc])]),
+        type table [FactKey = text, OC = text, Factura = text, No_Prov = Int64.Type, Bruto = number])
+in
+    Final
+```
+
+## TD3_DIMFACT
+
+```powerquery
+let
+    // TD3_DIMFACT (2026-10-05): una fila por OC + factura (nivel 4 de la dinamica de
+    // contratos/OC). Une las facturas de SINCO y las de provisiones; el texto que se muestra
+    // es el de SINCO cuando existe. Cada OC tiene ademas su fila "(sin factura)".
+    DeSinco = Table.AddColumn(Table.SelectColumns(TD3_FACTURAS, {"FactKey", "OC", "Factura"}), "Orden", each 1, Int64.Type),
+    DeProv = Table.AddColumn(Table.SelectColumns(TD3_PROV, {"FactKey", "OC", "Factura"}), "Orden", each 2, Int64.Type),
+    SinFactura = Table.FromRecords(List.Transform(TD3_OC[OC], (oc) => [FactKey = oc & "|SIN", OC = oc, Factura = "(sin factura)", Orden = 3]),
+        type table [FactKey = text, OC = text, Factura = text, Orden = Int64.Type]),
+    Todo = Table.Combine({DeSinco, DeProv, SinFactura}),
+    Final = Table.Group(Todo, {"FactKey", "OC"}, {{"Factura", each Table.Min(_, "Orden")[Factura], type text}})
+in
+    Final
+```
