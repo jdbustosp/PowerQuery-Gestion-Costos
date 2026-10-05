@@ -123,7 +123,7 @@ Los cruces entre fuentes se hacen por TEXTO, y las fuentes traen suciedad invisi
 | `# OC / Contrato` | `SINCO` ↔ `COMPARATIVOS` (excluir OCs ya comparados) | `Text.Trim` |
 | `Codigo act` (código de actividad) | seguimiento ↔ ppto | `FnFormatCodigoAct` + limpieza NBSP (ver comentario en `F_Globales`) |
 | `Ins` (insumo) | compras/contratos ↔ ítems | `FnClaveLimpia` (mayúsculas, sin tildes/símbolos) |
-| `Nombre Contratista` | varias | `FnCleanContratista` / `FnRemoveAccentsSymbols` |
+| `Nombre Contratista` | varias | `FnCleanContratista` / `FnRemoveAccentsSymbols`; en `BD` se unifica al nombre de SINCO (por OC y por `FnClaveNombre`) |
 
 **Regla:** si un cruce por texto "no hace match" y los valores se VEN iguales, casi siempre es espacio doble interno, NBSP o tilde. La normalización debe aplicarse **en los dos lados del join, con la misma función**. Para claves nuevas usar `F_Globales[FnNormalizeSpaces]`.
 
@@ -140,4 +140,16 @@ Los cruces entre fuentes se hacen por TEXTO, y las fuentes traen suciedad invisi
 
 - **2026-08**: `FnNormalizeSpaces` agregada a `F_Globales` y aplicada a `# CC - Comparativo` en `APROBACIONES_SP` y `COMPARATIVOS` (+ `# CC` y `Comparativo`): los nombres de comparativos del consolidador de SharePoint llegaban con espacios dobles internos y no cruzaban contra los manuales.
 - **2026-08** (`78c236c`): restauradas `Cantidad asegurada` y `V/U asegurada` en el recorte final de `BD.m` — un recorte de columnas pensado para La Arboleda se había aplicado globalmente.
+- **2026-10-05 — Clasificador ("siempre manda aprobaciones")**: `APROBACIONES_SP` trae `Clasificador:` y
+  `PROVISIONES_SP` trae `Clasificador_Actividad` (solo DIRECTOS) como `Clasificador`. En `BD` cada fila toma el primero
+  que exista: 1) aprobaciones por comparativo (nombre completo normalizado; las filas de aprobaciones conservan el de
+  su línea; contratos/compras por OC+insumo → comparativo vía Det_CC, u OC sola si tiene un único comparativo);
+  2) provisiones (propio u OC con un único clasificador); 3) Det_CC (respaldo; la columna se retira de los libros);
+  4) propagación CC|código act|insumo; 5) vacío.
+- **2026-10-05 — Contratistas**: se eliminó la "unificación por insumo" (ponía el primer proveedor del insumo en
+  todas sus filas: 43 de 273 OC de Turpial quedaban con dos nombres). Nombre maestro = SINCO: 1) por OC, 2) por la OC
+  del comparativo en Det_CC, 3) por clave normalizada (sin tildes, puntuación ni SAS/SA/LTDA/SCA/CIA/Y), 4) el propio;
+  luego tabla manual opcional `ALIAS_CONTRATISTAS` (Nombre fuente → Nombre unificado) si existe en el libro.
+- **2026-10-05 — Proyección**: POR ADJUDICAR y ADJUDICADO proyectan 0 si el insumo (CC|código act|insumo; si no
+  está en el seguimiento, la actividad) tiene ppto > 0 y `VT Proyectado` de SINCO (filas ITEMS) = 0.
 - La consulta `SINCO` calcula lo asegurado desde BD (Tipo CONTRATO/COMPRAS con `VT Asegurada ≠ 0`) y **excluye** las OC que ya existen en un comparativo manual (`Det_CC`), para no contar doble.

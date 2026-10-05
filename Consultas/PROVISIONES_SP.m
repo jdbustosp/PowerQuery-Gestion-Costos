@@ -43,7 +43,9 @@ let
     // 2. Renombrar columnas clave hacia BD.m
     ColumnasRenombradas = Table.RenameColumns(FiltroDirectos, {
         {"Nombre_prov", "Nombre Contratista"},
-        {"No_Orden_contrato", "# OC / Contrato"}
+        {"No_Orden_contrato", "# OC / Contrato"},
+        // Solo filas DIRECTOS: su Clasificador_Actividad usa el catalogo de clasificadores del libro
+        {"Clasificador_Actividad", "Clasificador"}
     }, MissingField.Ignore),
 
     // 3. Estandarizacion de tipos de datos
@@ -51,6 +53,7 @@ let
         {"PROYECTO", each FnTrimText(_), type text},
         {"Nombre Contratista", each FnTrimText(_), type text},
         {"# OC / Contrato", each FnTrimText(_), type text},
+        {"Clasificador", each FnTrimText(_), type text},
         {"VR_Bruto_con_desc", each FxToNumberFlex(_), type number}
     }, null, MissingField.Ignore),
 

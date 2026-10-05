@@ -57,12 +57,14 @@ let
         {"# CC", "# CC - Comparativo"},
         {"Cant. Total", "Cantidad CC Cons"},
         {"V/U TOTAL", "V/U CC cons"},
-        {"VR TOTAL", "VT CC cons"}
+        {"VR TOTAL", "VT CC cons"},
+        {"Clasificador:", "Clasificador"}
     }, MissingField.Ignore),
 
     TextosLimpios = Table.TransformColumns(ColumnasRenombradas, {
         {"Ins", each FnTrimText(_), type text},
         {"Nombre Contratista", each FnTrimText(_), type text},
+        {"Clasificador", each FnTrimText(_), type text},
         // Clave de cruce contra Det_CC/COMPARATIVOS: normalizar espacios dobles/duros que
         // vienen del consolidador de SharePoint, no solo Trim de extremos
         {"# CC - Comparativo", each F_Globales[FnNormalizeComparativo](_), type text},
@@ -95,13 +97,13 @@ let
             "# CC - Comparativo",
             "Cantidad CC Cons",
             "V/U CC cons",
-            "VT CC cons"
+            "VT CC cons",
+            "Clasificador"
         },
         MissingField.Ignore
     )
 in
     TablaFinal
-
 ```
 
 ## BD
@@ -202,34 +204,123 @@ let
     // Primero se filtran las filas CON clasificador y despues se deja una por llave:
     // al reves, Table.Distinct se quedaba con la primera fila de cada llave (casi
     // siempre ITEMS/PPTO, sin clasificador) y el de Det_CC se perdia.
-    ClasificadorRows = Table.Distinct(
+    // CLASIFICADOR (2026-10-05, regla del usuario: "siempre manda aprobaciones").
+    // Cada fila toma el primero que exista:
+    //   1. APROBACIONES (filas CC CONSOLIDADO) por su comparativo (nombre completo
+    //      normalizado: el numero solo se repite, ej. 002 topografia / 002 ensayos), o por el
+    //      comparativo de su OC/contrato segun el puente comparativo<->OC de Det_CC.
+    //   2. PROVISIONES: el de la propia fila de provision o el de las provisiones de su OC.
+    //   3. Det_CC (respaldo; la columna Clasificador de Det_CC se retira de los libros).
+    //   4. Propagacion por CC|codigo act|insumo desde las filas ya clasificadas en 1-3
+    //      (ITEMS, PPTO, POR ADJUDICAR, compras de insumos ya clasificados).
+    //   5. En blanco.
+    FnBuscar = (rec as record, key as nullable text) as any =>
+        if key = null or key = "" then null else Record.FieldOrDefault(rec, key, null),
+    FnTieneTexto = (v as any) as logical =>
+        let t = try Text.Trim(Text.From(v)) otherwise null in t <> null and t <> "",
+    FnOCKeyValida = (v as any) as nullable text =>
+        let k = CleanOCKey(v)
+        in if k = null or Text.Select(k, {"0".."9"}) = "" or Text.Remove(k, {"0"}) = "" then null else k,
+    // Sin insumo no hay llave (provisiones y compras sueltas): evita que "CC||" clasifique filas ajenas
+    FnClaveIns = (r as record) as nullable text =>
+        if r[Ins] = "" then null else r[Centro de Costos] & "|" & r[Codigo act] & "|" & r[Ins],
+    FnClaveComp = (r as record) as text => FnTextoODef(r[#"# CC - Comparativo"]),
+    FiltroConClasif = if Table.HasColumns(FiltroTipoValido, "Clasificador") then FiltroTipoValido else Table.AddColumn(FiltroTipoValido, "Clasificador", each null),
+    // Mapa clave -> valor solo para las claves con UN unico valor distinto: una OC puede
+    // incluir varios comparativos (o clasificadores) y no se debe repartir uno de ellos a todo.
+    FnMapaUnico = (tbl as table, claveFn as function, valorCol as text) as record =>
+        let
+            conClave = Table.SelectRows(Table.AddColumn(tbl, "__K", each claveFn(_), type text), each [__K] <> null and [__K] <> ""),
+            grupos = Table.Group(conClave, {"__K"}, {{"__V", each List.Distinct(List.RemoveNulls(Table.Column(_, valorCol))), type list}}),
+            unicos = Table.SelectRows(grupos, each List.Count([__V]) = 1)
+        in Record.FromList(List.Transform(unicos[__V], each _{0}), unicos[__K]),
+    FnFilasClasif = (tipo as text) as table =>
+        Table.TransformColumns(
+            Table.SelectRows(FiltroConClasif, each [Tipo] = tipo and FnTieneTexto([Clasificador])),
+            {{"Clasificador", each Text.Trim(Text.From(_)), type text}}),
+    FnClaveOC = (r as record) as nullable text => FnOCKeyValida(r[#"# OC / Contrato"]),
+    FnClaveOCIns = (r as record) as nullable text =>
+        let k = FnOCKeyValida(r[#"# OC / Contrato"]) in if k = null or r[Ins] = "" then null else k & "|" & r[Ins],
+    ClasifAprobComp = FnMapaModa(FnFilasClasif("CC CONSOLIDADO"), FnClaveComp, "Clasificador"),
+    ClasifProvOC    = FnMapaUnico(FnFilasClasif("PROVISIONES"), FnClaveOC, "Clasificador"),
+    ClasifDetComp   = FnMapaModa(FnFilasClasif("CC"), FnClaveComp, "Clasificador"),
+    ClasifDetOCIns  = FnMapaModa(FnFilasClasif("CC"), FnClaveOCIns, "Clasificador"),
+    ClasifDetOC     = FnMapaUnico(FnFilasClasif("CC"), FnClaveOC, "Clasificador"),
+    // Puente Det_CC: OC + insumo -> comparativo (exacto); OC sola solo si tiene un unico comparativo
+    FilasPuente = Table.SelectRows(FiltroTipoValido, each [Tipo] = "CC" and FnTextoODef([#"# CC - Comparativo"]) <> ""),
+    CompPorOCIns = FnMapaModa(FilasPuente, FnClaveOCIns, "# CC - Comparativo"),
+    CompPorOC    = FnMapaUnico(FilasPuente, FnClaveOC, "# CC - Comparativo"),
+    Etapa1 = Table.AddColumn(FiltroConClasif, "__ClasifFinal", each
+        let
+            comp = FnClaveComp(_),
+            ocK = FnOCKeyValida([#"# OC / Contrato"]),
+            ocIns = FnClaveOCIns(_),
+            compOCIns = FnBuscar(CompPorOCIns, ocIns),
+            compOC = FnTextoODef(if compOCIns <> null then compOCIns else FnBuscar(CompPorOC, ocK)),
+            propio = if FnTieneTexto([Clasificador]) then Text.Trim(Text.From([Clasificador])) else null,
+            // Las filas de aprobaciones conservan el de su linea (17 de 1.070 comparativos
+            // tienen lineas con clasificadores distintos); las demas toman el mayoritario
+            a0 = if [Tipo] = "CC CONSOLIDADO" then propio else null,
+            a1 = if a0 <> null then a0 else FnBuscar(ClasifAprobComp, comp),
+            a2 = if a1 <> null then a1 else FnBuscar(ClasifAprobComp, compOC),
+            p1 = if a2 <> null then a2 else if [Tipo] = "PROVISIONES" then propio else null,
+            p2 = if p1 <> null then p1 else FnBuscar(ClasifProvOC, ocK),
+            d1 = if p2 <> null then p2 else FnBuscar(ClasifDetComp, comp),
+            d2 = if d1 <> null then d1 else FnBuscar(ClasifDetOCIns, ocIns),
+            d3 = if d2 <> null then d2 else FnBuscar(ClasifDetOC, ocK)
+        in d3, type text),
+    ClasifPorIns = FnMapaModa(Table.SelectRows(Etapa1, each [__ClasifFinal] <> null), FnClaveIns, "__ClasifFinal"),
+    BaseClasificada0 = Table.AddColumn(Etapa1, "__Clasif2", each
+        if [__ClasifFinal] <> null then [__ClasifFinal] else FnBuscar(ClasifPorIns, FnClaveIns(_)), type text),
+    BaseClasificada = Table.RenameColumns(
+        Table.RemoveColumns(BaseClasificada0, {"Clasificador", "__ClasifFinal"}), {{"__Clasif2", "Clasificador"}}),
+
+    // CONTRATISTAS (2026-10-05): el nombre maestro es el de SINCO (filas CONTRATO/COMPRAS).
+    // Cada fila toma, en cascada: (1) el nombre SINCO de su OC/contrato, (2) el de la OC
+    // de su comparativo en Det_CC, (3) el nombre SINCO con la misma clave normalizada
+    // (sin tildes, puntuacion, espacios ni SAS/SA/LTDA/SCA/CIA/Y), (4) su propio nombre.
+    // Al final se aplica la tabla manual ALIAS_CONTRATISTAS (Nombre fuente -> Nombre
+    // unificado) si existe en el libro. Antes se unificaba por insumo y se pisaban
+    // proveedores distintos del mismo insumo.
+    SufijosSociales = {"SAS", "SA", "SCA", "LTDA", "LIMITADA", "CIA", "Y", "EU", "SENC", "ZOMAC", "BIC", "SUCURSAL"},
+    FnClaveNombre = (v as any) as nullable text =>
+        let
+            t = FnTextoODef(v),
+            t1 = Text.Replace(Text.Replace(Text.Upper(FnRemoveAccentMarks(t)), ".", ""), "&", "Y"),
+            partes = List.Select(Text.SplitAny(t1, " ,;:-_/\()'""#" & "#(tab)"), each _ <> "" and not List.Contains(SufijosSociales, _)),
+            k = Text.Select(Text.Combine(partes, ""), {"A".."Z", "0".."9"})
+        in if k = "" then null else k,
+    FilasSinco = Table.SelectRows(FiltroTipoValido, each ([Tipo] = "CONTRATO" or [Tipo] = "COMPRAS") and FnTieneTexto([Nombre Contratista])),
+    FnMapaModa = (tbl as table, claveFn as function, valorCol as text) as record =>
+        let
+            conClave = Table.SelectRows(Table.AddColumn(tbl, "__K", each claveFn(_), type text), each [__K] <> null and [__K] <> ""),
+            grupos = Table.Group(conClave, {"__K"}, {{"__V", each List.Mode(List.RemoveNulls(Table.Column(_, valorCol))), type text}})
+        in Record.FromList(grupos[__V], grupos[__K]),
+    NombrePorOC    = FnMapaModa(FilasSinco, each FnOCKeyValida([#"# OC / Contrato"]), "Nombre Contratista"),
+    NombrePorClave = FnMapaModa(FilasSinco, each FnClaveNombre([Nombre Contratista]), "Nombre Contratista"),
+    OCPorComp = FnMapaModa(
         Table.SelectRows(
-            Table.SelectColumns(FiltroTipoValido, {"Centro de Costos", "Codigo act", "Ins", "Clasificador"}, MissingField.Ignore),
-            each try ([Clasificador] <> null and Text.Trim(Text.From([Clasificador])) <> "") otherwise false
-        ),
-        {"Centro de Costos", "Codigo act", "Ins"}
-    ),
-    ClasificadorKeys = List.Transform(Table.ToRecords(Table.SelectColumns(ClasificadorRows, {"Centro de Costos", "Codigo act", "Ins"})), each [Centro de Costos] & "|" & [Codigo act] & "|" & [Ins]),
-    ClasificadorMap = Record.FromList(ClasificadorRows[Clasificador], ClasificadorKeys),
-    BaseClasificada = Table.AddColumn(Table.RemoveColumns(FiltroTipoValido, {"Clasificador"}, MissingField.Ignore), "Clasificador", each
-        let key = [Centro de Costos] & "|" & [Codigo act] & "|" & [Ins]
-        in try Record.Field(ClasificadorMap, key) otherwise null, type text),
-
-    // 🔥 UNIFICACION DE CONTRATISTAS (Prioridad: COMPRAS y CONTRATOS)
-    ContratistasPrioridad = Table.SelectRows(BaseClasificada, each ([Tipo] = "COMPRAS" or [Tipo] = "CONTRATOS") and [Nombre Contratista] <> null and Text.Trim([Nombre Contratista]) <> ""),
-    ContratistasMaestros = Table.Group(ContratistasPrioridad, {"Centro de Costos", "Codigo act", "Ins"}, {{"Nombre Maestro", each List.First([Nombre Contratista]), type text}}),
-
-    CruceContratistas = Table.NestedJoin(BaseClasificada, {"Centro de Costos", "Codigo act", "Ins"}, ContratistasMaestros, {"Centro de Costos", "Codigo act", "Ins"}, "Maestro", JoinKind.LeftOuter),
-    BaseExpandidaC = Table.ExpandTableColumn(CruceContratistas, "Maestro", {"Nombre Maestro"}),
-
-    BaseConNombreUnificado = Table.AddColumn(BaseExpandidaC, "Nombre Contratista Final", each if [Nombre Maestro] <> null then [Nombre Maestro] else [Nombre Contratista], type text),
-    BaseClasificadaFinal = Table.RenameColumns(
-        Table.RemoveColumns(BaseConNombreUnificado, {"Nombre Contratista", "Nombre Maestro"}, MissingField.Ignore),
-        {{"Nombre Contratista Final", "Nombre Contratista"}}
-    ),
+            Table.AddColumn(Table.SelectRows(FiltroTipoValido, each [Tipo] = "CC"), "__OC", each FnOCKeyValida([#"# OC / Contrato"]), type text),
+            each [__OC] <> null),
+        each FnTextoODef([#"# CC - Comparativo"]), "__OC"),
+    AliasTabla = try Excel.CurrentWorkbook(){[Name = "ALIAS_CONTRATISTAS"]}[Content] otherwise #table({"Nombre fuente", "Nombre unificado"}, {}),
+    AliasFilas = Table.SelectRows(AliasTabla, each try FnTieneTexto([Nombre unificado]) otherwise false),
+    AliasMapa = try FnMapaModa(AliasFilas, each try FnClaveNombre([Nombre fuente]) otherwise null, "Nombre unificado") otherwise [],
+    BaseClasificadaFinal = Table.AddColumn(BaseClasificada, "__NombreFinal", each
+            let
+                propio = if FnTieneTexto([Nombre Contratista]) then [Nombre Contratista] else null,
+                n1 = FnBuscar(NombrePorOC, FnOCKeyValida([#"# OC / Contrato"])),
+                n2 = if n1 <> null then n1 else FnBuscar(NombrePorOC, FnBuscar(OCPorComp, FnTextoODef([#"# CC - Comparativo"]))),
+                n3 = if n2 <> null then n2 else FnBuscar(NombrePorClave, FnClaveNombre(propio)),
+                cand = if n3 <> null then n3 else propio,
+                a1 = FnBuscar(AliasMapa, FnClaveNombre(cand)),
+                a2 = if a1 <> null then a1 else FnBuscar(AliasMapa, FnClaveNombre(propio))
+            in if a2 <> null then FnCleanContratista(a2) else cand, type text),
+    BaseClasificadaFinal2 = Table.RenameColumns(
+        Table.RemoveColumns(BaseClasificadaFinal, {"Nombre Contratista"}), {{"__NombreFinal", "Nombre Contratista"}}),
 
     // El "otherwise 0" del try ya cubre el caso null; no necesitamos doble guarda
-    NumerosSeguros = Table.TransformColumns(BaseClasificadaFinal, List.Transform(NumCols, each {_, ToNumber0, type number}), null, MissingField.Ignore),
+    NumerosSeguros = Table.TransformColumns(BaseClasificadaFinal2,List.Transform(NumCols, each {_, ToNumber0, type number}), null, MissingField.Ignore),
 
     // try/otherwise 0 aqui porque NumerosSeguros puede dejar errores de conversion si la celda
     // fuente traia un valor no numerico que Number.From no pudo convertir
@@ -301,8 +392,32 @@ let
     ComparativosContratados = List.Buffer(List.Distinct(List.Transform(
         Table.SelectRows(AddVUAseg, each [Tipo] = "CC" and List.Contains(OCsAseguradas, FnOCKey([#"# OC / Contrato"])) and FnOCKey([#"# OC / Contrato"]) <> "")[#"# CC - Comparativo"],
         FnTextoODef))),
+    // PROYECTADO SINCO EN 0 (2026-10-05, regla del usuario): si el insumo tiene ppto > 0
+    // pero su proyectado en el seguimiento de SINCO (filas ITEMS, VT Proyectado) es 0,
+    // POR ADJUDICAR y ADJUDICADO proyectan 0. Llave CC|codigo act|insumo; si el insumo no
+    // esta en el seguimiento (ADJUDICADO con el nombre del archivo de descargas), se mira
+    // la actividad completa (CC|codigo act). Sin fila ITEMS no se aplica.
+    FnSumaPor = (tipo as text, valorCol as text, claveFn as function) as record =>
+        let
+            filas = Table.SelectRows(AddVUAseg, each [Tipo] = tipo),
+            conClave = Table.SelectRows(Table.AddColumn(filas, "__K", each claveFn(_), type text), each [__K] <> null),
+            grupos = Table.Group(conClave, {"__K"}, {{"__S", each List.Sum(List.Transform(Table.Column(_, valorCol), ToNumber0)), type number}})
+        in Record.FromList(grupos[__S], grupos[__K]),
+    FnClaveAct = (r as record) as nullable text =>
+        if r[Codigo act] = "" then null else r[Centro de Costos] & "|" & r[Codigo act],
+    ProjSincoIns = FnSumaPor("ITEMS", "VT Proyectado", FnClaveIns),
+    ProjSincoAct = FnSumaPor("ITEMS", "VT Proyectado", FnClaveAct),
+    PptoIns = FnSumaPor("PPTO", "VT Presupuesto", FnClaveIns),
+    PptoAct = FnSumaPor("PPTO", "VT Presupuesto", FnClaveAct),
+    FnSincoEnCero = (r as record) as logical =>
+        let
+            kI = FnClaveIns(r), kA = FnClaveAct(r),
+            usarIns = kI <> null and Record.HasFields(ProjSincoIns, kI),
+            ppto = if usarIns then FnBuscar(PptoIns, kI) else FnBuscar(PptoAct, kA),
+            proj = if usarIns then FnBuscar(ProjSincoIns, kI) else FnBuscar(ProjSincoAct, kA)
+        in proj <> null and ppto <> null and ppto > 0 and Number.Abs(proj) < 1,
     AplicarProyeccion = Table.AddColumn(ConAsegActividad, "VT Proyectado Colsubsidio", each
-        if [Tipo] = "POR ADJUDICAR" then (if ToNumber0([vtAsegAct]) > 0 then 0 else [#"Valor Total ppto (CC)"])
+        if [Tipo] = "POR ADJUDICAR" then (if ToNumber0([vtAsegAct]) > 0 or FnSincoEnCero(_) then 0 else [#"Valor Total ppto (CC)"])
         // ADJUDICADO = descargado. Proyecta su valor SOLO mientras el comparativo no
         // tenga contrato/OC en SINCO (ej. pintura: comparativo aprobado, contrato sin
         // montar). Si el comparativo ya esta contratado, lo que no quedo en el contrato
@@ -311,6 +426,7 @@ let
         else if [Tipo] = "ADJUDICADO" then
             (if List.Contains(ComparativosContratados, FnTextoODef([#"# CC - Comparativo"])) then 0
              else if ToNumber0([vtAsegAct]) > 0 then 0
+             else if FnSincoEnCero(_) then 0
              else [#"Valor Total ppto (CC)"])
         else if [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS" then (if [VT Asegurada] <> 0 then [VT Asegurada] else null)
         else null,
@@ -513,7 +629,6 @@ let
     TablaMaestraFinal = Table.Buffer(FinalRecortada)
 in
     TablaMaestraFinal
-
 ```
 
 ## COMPARATIVOS
@@ -2584,7 +2699,9 @@ let
     // 2. Renombrar columnas clave hacia BD.m
     ColumnasRenombradas = Table.RenameColumns(FiltroDirectos, {
         {"Nombre_prov", "Nombre Contratista"},
-        {"No_Orden_contrato", "# OC / Contrato"}
+        {"No_Orden_contrato", "# OC / Contrato"},
+        // Solo filas DIRECTOS: su Clasificador_Actividad usa el catalogo de clasificadores del libro
+        {"Clasificador_Actividad", "Clasificador"}
     }, MissingField.Ignore),
 
     // 3. Estandarizacion de tipos de datos
@@ -2592,6 +2709,7 @@ let
         {"PROYECTO", each FnTrimText(_), type text},
         {"Nombre Contratista", each FnTrimText(_), type text},
         {"# OC / Contrato", each FnTrimText(_), type text},
+        {"Clasificador", each FnTrimText(_), type text},
         {"VR_Bruto_con_desc", each FxToNumberFlex(_), type number}
     }, null, MissingField.Ignore),
 
@@ -2610,7 +2728,6 @@ let
     , type text)
 in
     AgregadoCC
-
 ```
 
 ## SINCO

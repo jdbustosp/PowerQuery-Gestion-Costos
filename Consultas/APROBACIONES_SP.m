@@ -50,12 +50,14 @@ let
         {"# CC", "# CC - Comparativo"},
         {"Cant. Total", "Cantidad CC Cons"},
         {"V/U TOTAL", "V/U CC cons"},
-        {"VR TOTAL", "VT CC cons"}
+        {"VR TOTAL", "VT CC cons"},
+        {"Clasificador:", "Clasificador"}
     }, MissingField.Ignore),
 
     TextosLimpios = Table.TransformColumns(ColumnasRenombradas, {
         {"Ins", each FnTrimText(_), type text},
         {"Nombre Contratista", each FnTrimText(_), type text},
+        {"Clasificador", each FnTrimText(_), type text},
         // Clave de cruce contra Det_CC/COMPARATIVOS: normalizar espacios dobles/duros que
         // vienen del consolidador de SharePoint, no solo Trim de extremos
         {"# CC - Comparativo", each F_Globales[FnNormalizeComparativo](_), type text},
@@ -88,7 +90,8 @@ let
             "# CC - Comparativo",
             "Cantidad CC Cons",
             "V/U CC cons",
-            "VT CC cons"
+            "VT CC cons",
+            "Clasificador"
         },
         MissingField.Ignore
     )
