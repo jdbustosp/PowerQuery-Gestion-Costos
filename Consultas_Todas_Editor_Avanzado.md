@@ -1667,7 +1667,9 @@ let
     DetCC_J2 = Table.NestedJoin(DetCC_ConCod, {"Centro de Costos", "CodNom", "InsNorm"}, IdxCodIns, {"Centro de Costos", "CodNom", "InsNorm"}, "__R2", JoinKind.LeftOuter),
     DetCC_J3 = Table.NestedJoin(DetCC_J2, {"Centro de Costos", "CodNom"}, IdxCod, {"Centro de Costos", "CodNom"}, "__R3", JoinKind.LeftOuter),
     DetCC_J4 = Table.NestedJoin(DetCC_J3, {"Centro de Costos", "CodNom"}, IdxCodTodos, {"Centro de Costos", "CodNom"}, "__R4", JoinKind.LeftOuter),
-    DetCC_Resuelto = Table.FromRecords(Table.TransformRows(DetCC_J4, (r) =>
+    // Sin descargas (proyecto nuevo) Table.FromRecords({}) devuelve una tabla SIN columnas y
+    // el Table.Group del Cruce 2 falla por 'Centro de Costos': vacia, se conserva la estructura.
+    DetCC_Resuelto = if Table.IsEmpty(DetCC_J4) then Table.RemoveColumns(DetCC_J4, {"__R2", "__R3", "__R4", "CodNom"}) else Table.FromRecords(Table.TransformRows(DetCC_J4, (r) =>
         let
             base = Record.RemoveFields(r, {"__R2", "__R3", "__R4", "CodNom"}),
             insBase = FnInsBase(r[InsNorm]),
