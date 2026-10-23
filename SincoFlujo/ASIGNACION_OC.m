@@ -4,12 +4,13 @@
 // Columnas fijas (subflujo ASIGNACION ORDENES; filtra por A = Cod Orden y
 // D = INSUMO de la hoja ORDENES COMPRA, y toma de alli OC SINCO):
 //   A Cod Orden  B CAPITULO  C ACTIVIDAD (codigo del item)  D INSUMO
-//   E V/U  F COMPRADO (del item)
-//   G CONSUMIDO = recibido del insumo en la orden x COMPRADO del item / COMPRADO total
+//   E V/U  F CONSUMIDO = recibido del insumo en la orden x comprado del item / comprado total
+//   G COMPRADO del item = cantidad que asigna el flujo (debe ser > 0: la asignacion
+//     reparte la linea de la OC, se haga o no la entrada)
 // El estado de la asignacion queda en ORDENES COMPRA (ESTADO ASIGNACION).
 let
     OrigenActual = try Text.Upper(Text.Trim(Origen)) otherwise "SINCO",
-    ColsSalida = {"Cod Orden","CAPITULO","ACTIVIDAD","INSUMO","V/U","COMPRADO","CONSUMIDO"},
+    ColsSalida = {"Cod Orden","CAPITULO","ACTIVIDAD","INSUMO","V/U","CONSUMIDO","COMPRADO"},
 
     SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
     Headers = [Accept="application/json;odata=nometadata"],
