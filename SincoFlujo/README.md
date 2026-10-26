@@ -14,6 +14,7 @@ y conservan entre refrescos lo que escribe el flujo (`FxConservarEstado`).
 | Consulta | Hoja | Fuente |
 |---|---|---|
 | PLANTILLA_PPTO_SINCO / _ORACLE | PLANTILLA SINCO | SEGUIMIENTO + APU |
+| PLANTILLA_PPTO_ACTUALIZADO | PLANTILLA SINCO | presupuesto actualizado de "0. Descargas pptos" (en lugar del ERP del constructor) |
 | ACTIVIDADES_NUEVAS | ACTIVIDADES NUEVAS | SEGUIMIENTO vs APU |
 | INSUMOS_NUEVOS | INSUMOS NUEVOS | SEGUIMIENTO vs APU |
 | PROYECCION_INSUMOS | PROYECCION INSUMOS | SEGUIMIENTO (proyeccion distinta del presupuesto) |
