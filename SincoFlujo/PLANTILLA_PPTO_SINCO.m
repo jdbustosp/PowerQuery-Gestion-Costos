@@ -251,10 +251,11 @@ let
     ExpandSeguimiento = Table.ExpandTableColumn(JoinSeguimiento, "SegGroup", {"TipoInsumoSeg"}, {"TipoInsumoSeg"}),
 
     // Tipos validos en el Maestro Tipos Insumos del SINCO destino. Cualquier
-    // tipo de la constructora que no exista alli (A, C, F, V, minusculas, etc.)
+    // tipo de la constructora que no exista alli (A, C, F, V, X, minusculas, etc.;
+    // X fue rechazado por el importador del SINCO destino el 2026-10-25)
     // hace fallar la importacion de la plantilla, asi que se mapea a
     // "Y" (POR CLASIFICAR).
-    TiposValidos = {"E","I","O","M","N","Z","Y","P","S","T","X"},
+    TiposValidos = {"E","I","O","M","N","Y","P","S","T"},
     AddTipoInsumo = Table.AddColumn(ExpandSeguimiento, "Tipo Insumo", each
         if [Tipo] = "Insumo" then
             let

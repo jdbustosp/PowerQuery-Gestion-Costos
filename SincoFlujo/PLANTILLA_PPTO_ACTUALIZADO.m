@@ -170,7 +170,7 @@ let
     DictGrupoIns = Record.FromList(
         List.Transform(Table.Column(MaestroDist, "Column4"), Text.Trim),
         List.Transform(Table.Column(MaestroDist, "Column1"), Text.Trim)),
-    TiposValidos = {"E", "I", "O", "M", "N", "Z", "Y", "P", "S", "T", "X"},
+    TiposValidos = {"E", "I", "O", "M", "N", "Y", "P", "S", "T"},
     FnTipoInsumo = (articulo as text) as text =>
         let
             delMaestro = Record.FieldOrDefault(DictTipoIns, articulo, null),

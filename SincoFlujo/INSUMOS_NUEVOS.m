@@ -119,7 +119,7 @@ let
     Ordenado = Table.Sort(ConCant, {{"ActCod", Order.Ascending}, {"InsDesc", Order.Ascending}}),
 
     // Tipos validos del Maestro Tipos Insumos del SINCO destino; lo demas = "Y" (POR CLASIFICAR)
-    TiposValidos = {"E","I","O","M","N","Z","Y","P","S","T","X"},
+    TiposValidos = {"E","I","O","M","N","Y","P","S","T"},
     Nuevo = Table.FromRecords(Table.TransformRows(Ordenado, (r) => [
         ACTIVIDAD = r[ActCod] & " - " & r[ActDesc],
         INSUMO = r[InsDesc],
