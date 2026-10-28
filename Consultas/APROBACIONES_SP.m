@@ -66,7 +66,13 @@ let
         {"VT CC cons", each FxToNumberFlex(_), type number}
     }, null, MissingField.Ignore),
 
-    AgregadoTipo = Table.AddColumn(TextosLimpios, "Tipo", each "CC Consolidado", type text),
+    // SOLO COSTOS DIRECTOS (2026-10-27, pedido de Juan en Turpial): fuera las aprobaciones de
+    // indirectos; su comparativo lo dice, ej. "019 (INDIRECTOS)-CERTIFICACION RETIE, RETILAP Y RITEL".
+    SoloDirectos = Table.SelectRows(TextosLimpios, each
+        let c = FnRemoveAccentsSymbols(Text.Upper(Text.From([#"# CC - Comparativo"])))
+        in c = null or not Text.Contains(c, "INDIRECTO")),
+
+    AgregadoTipo = Table.AddColumn(SoloDirectos, "Tipo", each "CC Consolidado", type text),
     AgregadoCC = Table.AddColumn(AgregadoTipo, "Centro de Costos", each
         if Text.StartsWith(Text.Upper(ParamProyecto), "PAMPLONA 1") and [#"# CC - Comparativo"] <> null then
             let
