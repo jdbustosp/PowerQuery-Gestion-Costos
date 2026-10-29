@@ -72,6 +72,9 @@ let
             Text.Contains([FileName], "MASIVO SALIDAS",                Comparer.OrdinalIgnoreCase) or
             Text.Contains([FileName], "ESTADO DE CONTRATOS",           Comparer.OrdinalIgnoreCase) or
             Text.Contains([FileName], "DESCUENTOS",                    Comparer.OrdinalIgnoreCase) or
+            // NIT del proveedor/contratista (CONTRATOS_SINCO y ORDENES_COMPRA)
+            Text.Contains([FileName], "RELACION DE PAGOS",             Comparer.OrdinalIgnoreCase) or
+            Text.Contains([FileName], "FACTURACI",                     Comparer.OrdinalIgnoreCase) or
             // reportes de proyectos con origen ORACLE (VERSALLES, MONGUI, ...)
             Text.Contains([FileName], "ASEGURADO",                     Comparer.OrdinalIgnoreCase) or
             Text.Contains([FileName], "CONTROL",                       Comparer.OrdinalIgnoreCase) or

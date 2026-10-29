@@ -9,6 +9,8 @@
 // actividad; cada insumo va por unidad del grupo (G = cantidad / E,
 // H = valor total / E), asi E x suma(H) = valor contratado. Con un solo insumo
 // por grupo, G = 1 y H = valor unitario.
+//   R NIT contratista (informe de pagos por contrato o por nombre)  S Nombre contratista
+//   (de "Contratista:" del reporte; el flujo busca el tercero por este nombre)
 // I..Q los escribe el flujo (o el usuario: fechas) y se conservan entre
 // refrescos con la clave Cod Contrato|Grupo|Insumo. Las filas nuevas de un
 // contrato ya creado heredan su estado, numero SINCO, aprobacion y fechas; las
@@ -279,7 +281,13 @@ let
             AddFilaTexto = Table.AddColumn(Source, "FilaTexto", each let vals = Record.FieldValues(_), soloTexto = List.Transform(List.Select(vals, each _ <> null and _ <> ""), Text.From) in Text.Trim(Text.Combine(soloTexto, " ")), type text),
             AddOC = Table.AddColumn(AddFilaTexto, "Cod Contrato", each let txt = [FilaTexto] in if txt <> null and Text.Contains(Text.Upper(txt), "CONTRATO NO") then let after = Text.TrimStart(Text.Replace(Text.Range(txt, Text.PositionOf(Text.Upper(txt), "CONTRATO NO") + 11), "#(00A0)", " "), {".", ":", " "}), first = Text.BeforeDelimiter(after, " "), num = Text.Select(if first = "" then after else first, {"0".."9"}) in if num = "" then null else num else null, type text),
             AddDesc = Table.AddColumn(AddOC, "Descripcion contrato", each let txt = [FilaTexto] in if txt <> null and Text.Contains(Text.Upper(txt), "CONTRATO NO") then let after = Text.TrimStart(Text.Range(txt, Text.PositionOf(Text.Upper(txt), "CONTRATO NO") + 11), {".", ":", " "}), idx = Text.PositionOfAny(after, {"A".."Z","a".."z"}), desc = if idx = -1 then null else Text.Range(after, idx), lim = if desc = null then null else if Text.Contains(Text.Upper(desc), "CONTRATISTA") then Text.BeforeDelimiter(Text.Upper(desc), "CONTRATISTA") else desc in if lim = null then null else Text.Trim(lim) else null, type text),
-            AddNombre = Table.AddColumn(AddDesc, "Nombre Contratista", each let txt = [FilaTexto] in if txt <> null and Text.Contains(Text.Upper(txt), "CONTRATISTA") then Text.Trim(Text.TrimStart(Text.AfterDelimiter(Text.Upper(txt), "CONTRATISTA"), {":","-"," "})) else null, type text),
+            // Solo en la fila "Contrato No. ... Contratista: NOMBRE"; "" (no null) si no trae contratista, para que
+            // el FillDown no le pase el del contrato anterior
+            AddNombre = Table.AddColumn(AddDesc, "Nombre Contratista", each let up = if [FilaTexto] = null then "" else Text.Upper([FilaTexto]) in
+                if not Text.Contains(up, "CONTRATO NO") then null
+                else if Text.Contains(up, "CONTRATISTA:") then Text.Trim(Text.TrimStart(Text.AfterDelimiter(up, "CONTRATISTA:", {0, RelativePosition.FromEnd}), {"-"," "}))
+                else if Text.Contains(up, "CONTRATISTA") then Text.Trim(Text.TrimStart(Text.AfterDelimiter(up, "CONTRATISTA"), {":","-"," "}))
+                else "", type text),
             FillDown1 = Table.FillDown(AddNombre, {"Cod Contrato","Descripcion contrato","Nombre Contratista"}),
 
             AddCodAct = Table.AddColumn(FillDown1, "CodigoAct", each let c = [Columna1], t = if c = null then null else Text.Trim(Text.From(c)) in if t <> null and t <> "" and (try Number.From(Text.Replace(t, ".", "")) otherwise null) <> null then FnFormatCodigoAct(t) else null, type text),
@@ -311,6 +319,38 @@ let
     Contratos = Table.Buffer(if List.Count(Centros) = 0 then #table({"Cod Contrato","Descripcion contrato","Nombre Contratista","CodigoAct","Columna2","Columna3","InsClave_Cruce","Cantidad Contratado","VT Contratado","Centro de Costos"},{}) else Table.Combine(List.Transform(Centros, each FnContratosCC(_)))),
     ContratosValidos = Table.SelectRows(Contratos, each [Cod Contrato] <> null and [VT Contratado] <> null and [VT Contratado] <> 0),
 
+    // ===== 4b. NIT del contratista: "Informe relacion de pagos" por contrato; si no, por nombre
+    //          (beneficiarios de pagos y proveedores de "Facturacion de entradas y actas") =====
+    FnTxtCelda = (v as any) as text => if v = null then "" else Text.Trim(Text.Replace(Text.From(v), "#(00A0)", " ")),
+    FnNormNombre = (v as any) as text => Text.Select(Text.Upper(FnTxtCelda(v)), {"A".."Z","0".."9"}),
+    FnEsNumero = (v as any) as logical => let t = FnTxtCelda(v) in t <> "" and Text.Select(t, {"0".."9"}) = t,
+    FnLeerInforme = (bin as nullable binary) as table =>
+        if bin = null then #table({"Columna1","Columna2","Columna3","Columna4"}, {}) else
+        let
+            raw = try Excel.Workbook(bin, null, true){0}[Data] otherwise Html.Table(Text.FromBinary(bin, 1252), FnBuildColumnas(4), [RowSelector="tr"]),
+            cols = Table.ColumnNames(raw)
+        in Table.RenameColumns(raw, List.Zip({cols, List.Transform({1..List.Count(cols)}, each "Columna" & Text.From(_))})),
+    // (fuente, documento, NIT, nombre): pagos = Fecha|Contrato|Beneficiario|NIT; facturacion = Orden|Entrada|NIT|Nombre
+    FnTercerosCC = (cc as text) as table =>
+        let
+            sub = Table.SelectRows(ArchivosActual, each [Centro de Costos] = cc),
+            pagos = Table.ToRecords(FnLeerInforme(FnPickLatest(sub, "RELACION DE PAGOS"))),
+            fact = Table.ToRecords(FnLeerInforme(FnPickLatest(sub, "FACTURACI"))),
+            Campo = (r as record, c as text) as any => Record.FieldOrDefault(r, c, null),
+            dePagos = List.Transform(List.Select(pagos, each FnEsNumero(Campo(_, "Columna2")) and FnEsNumero(Campo(_, "Columna4"))),
+                each {"PAGOS", FnTxtCelda(Campo(_, "Columna2")), FnTxtCelda(Campo(_, "Columna4")), FnTxtCelda(Campo(_, "Columna3"))}),
+            deFact = List.Transform(List.Select(fact, each FnEsNumero(Campo(_, "Columna1")) and FnEsNumero(Campo(_, "Columna3"))),
+                each {"FACT", FnTxtCelda(Campo(_, "Columna1")), FnTxtCelda(Campo(_, "Columna3")), FnTxtCelda(Campo(_, "Columna4"))})
+        in #table(type table [Fuente = text, Doc = text, NIT = text, Nombre = text], dePagos & deFact),
+    Terceros = Table.Buffer(Table.Combine({#table(type table [Fuente = text, Doc = text, NIT = text, Nombre = text], {})} & List.Transform(Centros, each FnTercerosCC(_)))),
+    NitPorContrato = Table.Distinct(Table.SelectRows(Terceros, each [Fuente] = "PAGOS"), {"Doc"}),
+    MapaNitContrato = Record.FromList(NitPorContrato[NIT], List.Transform(NitPorContrato[Doc], each "k" & _)),
+    NitPorNombre = Table.Distinct(Table.SelectRows(Table.AddColumn(Terceros, "Clave", each FnNormNombre([Nombre]), type text), each [Clave] <> ""), {"Clave"}),
+    MapaNitNombre = Record.FromList(NitPorNombre[NIT], List.Transform(NitPorNombre[Clave], each "k" & _)),
+    FnNitContratista = (contrato as any, nombre as any) as nullable text =>
+        let porContrato = Record.FieldOrDefault(MapaNitContrato, "k" & FnTxtCelda(contrato), null)
+        in if porContrato <> null then porContrato else Record.FieldOrDefault(MapaNitNombre, "k" & FnNormNombre(nombre), null),
+
 
     // ===== 5. Insumo oficial (nombre del SEGUIMIENTO) y totales por fila =====
     ConInsumo = Table.NestedJoin(ContratosValidos, {"Centro de Costos", "CodigoAct", "InsClave_Cruce"}, MaestroInsumosDist, {"Centro de Costos", "Codigo act", "InsClave_Cruce"}, "INS", JoinKind.LeftOuter),
@@ -333,9 +373,11 @@ let
             Insumo = FnQuitarTildes(FnSepararUM(insTxt)[Nombre]),
             Cant = if r[Cantidad Contratado] = null then 0 else r[Cantidad Contratado],
             VT = r[VT Contratado],
+            NombreC = if FnTxtCelda(r[Nombre Contratista]) = "" then null else FnTxtCelda(r[Nombre Contratista]),
+            NitC = FnNitContratista(r[Cod Contrato], r[Nombre Contratista]),
             __Orden = r[__Orden]
         ]),
-        type table [#"Cod Contrato" = text, Descripcion = text, Grupo = text, UMGrupo = nullable text, Insumo = text, Cant = number, VT = number, __Orden = number]),
+        type table [#"Cod Contrato" = text, Descripcion = text, Grupo = text, UMGrupo = nullable text, Insumo = text, Cant = number, VT = number, NombreC = nullable text, NitC = nullable text, __Orden = number]),
 
     // Un mismo insumo repetido en la actividad del contrato se suma en una fila
     Agrupado = Table.Group(Filas, {"Cod Contrato", "Grupo", "Insumo"}, {
@@ -343,6 +385,8 @@ let
         {"UMGrupo", each List.First(List.Select([UMGrupo], each _ <> null and _ <> "")), type nullable text},
         {"Cant", each List.Sum([Cant]), type number},
         {"VT", each List.Sum([VT]), type number},
+        {"NombreC", each List.First(List.RemoveNulls([NombreC])), type nullable text},
+        {"NitC", each List.First(List.RemoveNulls([NitC])), type nullable text},
         {"__Orden", each List.Min([__Orden]), type number}}),
     AgrupadoOrden = Table.Sort(Agrupado, {{"__Orden", Order.Ascending}}),
 
@@ -355,7 +399,9 @@ let
         "__G", {"CantGrupo", "UMG"}, {"CantGrupo", "UMG"}), {{"__Orden", Order.Ascending}}),
 
     ColsBase = {"Cod Contrato","Descripcion","Grupo (actividad)","UM grupo","Cantidad grupo","Insumo","Cantidad detalle (vacia = 1)","Valor"},
-    Nuevo = if Table.RowCount(ConCantGrupo) = 0 then #table(ColsBase, {}) else
+    // Al final de la hoja (despues de las del flujo) para no correr las columnas que lee el PAD; se recalculan
+    ColsProv = {"NIT contratista","Nombre contratista"},
+    Nuevo = if Table.RowCount(ConCantGrupo) = 0 then #table(ColsBase & ColsProv, {}) else
         Table.FromRecords(Table.TransformRows(ConCantGrupo, (r) =>
             let
                 e = if r[CantGrupo] = null then 1 else r[CantGrupo],
@@ -368,12 +414,14 @@ let
                 #"Cantidad grupo" = Number.Round(e, 4),
                 Insumo = r[Insumo],
                 #"Cantidad detalle (vacia = 1)" = Number.Round(cantDet, 4),
-                Valor = Number.Round(r[VT] / e, 2)
+                Valor = Number.Round(r[VT] / e, 2),
+                #"NIT contratista" = r[NitC],
+                #"Nombre contratista" = r[NombreC]
             ])),
 
     // ===== 6. Conservar lo que escribio el flujo =====
     ColsEstado = {"ESTADO CONTRATO","ESTADO GRUPO","ESTADO DETALLE","HORA DETALLE","APROBACION","No SINCO","LIMPIEZA","FECHA INICIO (dd/mm/aaaa; vacia = hoy)","FECHA FIN (vacia = +1 ano)"},
-    ColsSalida = ColsBase & ColsEstado,
+    ColsSalida = ColsBase & ColsEstado & ColsProv,
     Conservado = FxConservarEstado(Nuevo, "CONTRATOS_SINCO", {"Cod Contrato", "Grupo (actividad)", "Insumo"}, ColsEstado, ColsSalida),
 
     // ===== 7. Orden: grupos contiguos dentro de cada contrato =====
