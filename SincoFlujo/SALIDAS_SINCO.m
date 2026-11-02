@@ -85,7 +85,7 @@ let
     MapaNitNombre = Record.FromList(NitNombre[NIT], List.Transform(NitNombre[Clave], each "k" & _)),
 
     // ===== 3. Una fila por linea, ordenadas por salida de origen y linea =====
-    Ordenado = Table.Sort(ConCantidad, {{"Salida origen", Order.Ascending}, {"__I", Order.Ascending}}),
+    Ordenado = if Table.RowCount(ConCantidad) = 0 then ConCantidad else Table.Sort(ConCantidad, {{"Salida origen", Order.Ascending}, {"__I", Order.Ascending}}),
     Nuevo = if Table.RowCount(Ordenado) = 0 then #table(ColsBase & ColsProv, {}) else
         Table.FromRecords(Table.TransformRows(Ordenado, (r) =>
             Record.SelectFields(r, ColsBase) & [
