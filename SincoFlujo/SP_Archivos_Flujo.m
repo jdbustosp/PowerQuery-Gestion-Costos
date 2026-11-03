@@ -80,7 +80,10 @@ let
             Text.Contains([FileName], "CONTROL",                       Comparer.OrdinalIgnoreCase) or
             Text.Contains([FileName], "COMPRAS",                       Comparer.OrdinalIgnoreCase) or
             Text.Contains([FileName], "CONTRATOS.",                    Comparer.OrdinalIgnoreCase) or
-            Text.Contains([FileName], "ENTRADAS Y SALIDAS",            Comparer.OrdinalIgnoreCase)
+            Text.Contains([FileName], "ENTRADAS Y SALIDAS",            Comparer.OrdinalIgnoreCase) or
+            // informes del traspaso de entradas y actas
+            Text.Contains([FileName], "MASIVO DE ENTRADAS",            Comparer.OrdinalIgnoreCase) or
+            Text.Contains([FileName], "DETALLADO ACTAS",               Comparer.OrdinalIgnoreCase)
         )
     ),
 

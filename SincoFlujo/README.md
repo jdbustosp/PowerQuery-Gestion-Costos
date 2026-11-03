@@ -21,3 +21,4 @@ y conservan entre refrescos lo que escribe el flujo (`FxConservarEstado`).
 | CONTRATOS_SINCO | CONTRATOS | ESTADO DE CONTRATOS + SEGUIMIENTO + APU |
 | ORDENES_COMPRA | ORDENES COMPRA | INFORMEORDEN + ESTADO DE ORDENES |
 | ASIGNACION_OC | ASIGNACION | INFORMEORDEN + ESTADO DE ORDENES |
+| ENTRADAS (tabla ENTRADAS_SINCO) | ENTRADAS | Informe masivo de entradas + Facturacion de entradas y actas |

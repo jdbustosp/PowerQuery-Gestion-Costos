@@ -11,6 +11,7 @@
 // por grupo, G = 1 y H = valor unitario.
 //   R NIT contratista (informe de pagos por contrato o por nombre)  S Nombre contratista
 //   (de "Contratista:" del reporte; el flujo busca el tercero por este nombre)
+//   T % anticipo (anticipos positivos del informe de pagos / valor contratado; 0 = sin anticipo)
 // I..Q los escribe el flujo (o el usuario: fechas) y se conservan entre
 // refrescos con la clave Cod Contrato|Grupo|Insumo. Las filas nuevas de un
 // contrato ya creado heredan su estado, numero SINCO, aprobacion y fechas; las
@@ -351,6 +352,31 @@ let
         let porContrato = Record.FieldOrDefault(MapaNitContrato, "k" & FnTxtCelda(contrato), null)
         in if porContrato <> null then porContrato else Record.FieldOrDefault(MapaNitNombre, "k" & FnNormNombre(nombre), null),
 
+    // ===== 4c. Anticipos positivos por contrato ("Informe relacion de pagos"). Dos formatos segun la
+    //          constructora: 27 columnas (Anticipo en la 10) o 31, con SubTotal y A, I, U (Anticipo en la 14) =====
+    FnNumCelda = (v as any) as number =>
+        if v is number then v else
+        let n = try Number.FromText(Text.Replace(Text.Replace(FnTxtCelda(v), ",", ""), "$", ""), "en-US") otherwise null
+        in if n = null then 0 else n,
+    FnAnticiposCC = (cc as text) as table =>
+        let
+            bin = FnPickLatest(Table.SelectRows(ArchivosActual, each [Centro de Costos] = cc), "RELACION DE PAGOS"),
+            filas = if bin = null then {} else
+                let
+                    raw = try Excel.Workbook(bin, null, true){0}[Data] otherwise Html.Table(Text.FromBinary(bin, 1252), FnBuildColumnas(31), [RowSelector="tr"]),
+                    cols = Table.ColumnNames(raw)
+                in Table.ToRecords(Table.RenameColumns(raw, List.Zip({cols, List.Transform({1..List.Count(cols)}, each "Columna" & Text.From(_))}))),
+            Campo = (r as record, c as text) as any => Record.FieldOrDefault(r, c, null),
+            ConSubTotal = List.AnyTrue(List.Transform(filas, (r) => List.Contains(List.Transform(Record.FieldValues(r), (v) => Text.Upper(FnTxtCelda(v))), "SUBTOTAL"))),
+            ColAnticipo = if ConSubTotal then "Columna14" else "Columna10",
+            Datos = List.Select(filas, each FnEsNumero(Campo(_, "Columna2")) and FnEsNumero(Campo(_, "Columna4"))),
+            Valores = List.Transform(Datos, each {FnTxtCelda(Campo(_, "Columna2")), FnNumCelda(Campo(_, ColAnticipo))})
+        in #table(type table [Contrato = text, Anticipo = number], List.Select(Valores, each _{1} > 0)),
+    AnticiposPorContrato = Table.Group(
+        Table.Combine({#table(type table [Contrato = text, Anticipo = number], {})} & List.Transform(Centros, each FnAnticiposCC(_))),
+        {"Contrato"}, {{"Anticipo", each List.Sum([Anticipo]), type number}}),
+    MapaAnticipo = Record.FromList(AnticiposPorContrato[Anticipo], List.Transform(AnticiposPorContrato[Contrato], each "k" & _)),
+
 
     // ===== 5. Insumo oficial (nombre del SEGUIMIENTO) y totales por fila =====
     ConInsumo = Table.NestedJoin(ContratosValidos, {"Centro de Costos", "CodigoAct", "InsClave_Cruce"}, MaestroInsumosDist, {"Centro de Costos", "Codigo act", "InsClave_Cruce"}, "INS", JoinKind.LeftOuter),
@@ -390,6 +416,16 @@ let
         {"__Orden", each List.Min([__Orden]), type number}}),
     AgrupadoOrden = Table.Sort(Agrupado, {{"__Orden", Order.Ascending}}),
 
+    // % de anticipo = anticipos / contratado, hacia arriba a 2 decimales para que el anticipo quepa en el tope
+    ContratadoPorContrato = Table.Group(Agrupado, {"Cod Contrato"}, {{"VT", each List.Sum([VT]), type number}}),
+    MapaContratado = Record.FromList(ContratadoPorContrato[VT], List.Transform(ContratadoPorContrato[Cod Contrato], each "k" & FnTxtCelda(_))),
+    FnPctAnticipo = (contrato as any) as number =>
+        let
+            k = "k" & FnTxtCelda(contrato),
+            a = Record.FieldOrDefault(MapaAnticipo, k, 0),
+            c = Record.FieldOrDefault(MapaContratado, k, 0)
+        in if a <= 0 or c <= 0 then 0 else List.Min({100, Number.RoundUp(Number.Round(10000 * a / c, 6)) / 100}),
+
     // Cantidad del grupo = la del primer insumo con cantidad del contrato en esa actividad
     CantGrupo = Table.Group(AgrupadoOrden, {"Cod Contrato", "Grupo"}, {
         {"CantGrupo", each List.First(List.Select([Cant], each _ <> null and _ <> 0)), type nullable number},
@@ -400,7 +436,7 @@ let
 
     ColsBase = {"Cod Contrato","Descripcion","Grupo (actividad)","UM grupo","Cantidad grupo","Insumo","Cantidad detalle (vacia = 1)","Valor"},
     // Al final de la hoja (despues de las del flujo) para no correr las columnas que lee el PAD; se recalculan
-    ColsProv = {"NIT contratista","Nombre contratista"},
+    ColsProv = {"NIT contratista","Nombre contratista","% anticipo"},
     Nuevo = if Table.RowCount(ConCantGrupo) = 0 then #table(ColsBase & ColsProv, {}) else
         Table.FromRecords(Table.TransformRows(ConCantGrupo, (r) =>
             let
@@ -416,7 +452,8 @@ let
                 #"Cantidad detalle (vacia = 1)" = Number.Round(cantDet, 4),
                 Valor = Number.Round(r[VT] / e, 2),
                 #"NIT contratista" = r[NitC],
-                #"Nombre contratista" = r[NombreC]
+                #"Nombre contratista" = r[NombreC],
+                #"% anticipo" = FnPctAnticipo(r[Cod Contrato])
             ])),
 
     // ===== 6. Conservar lo que escribio el flujo =====
