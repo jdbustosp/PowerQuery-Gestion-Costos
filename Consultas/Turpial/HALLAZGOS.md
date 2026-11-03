@@ -43,3 +43,6 @@ Regla de Juan: contratos y órdenes de compra toman el clasificador solo de los 
   coinciden y proyectan 0, lo que puede mover `VT Proyectado Colsubsidio`.
 - `CONTRATOS` usa la misma llave por nombre que tenía `COMPRAS`; falta verificar si tiene el mismo problema.
 - Versalles usa `ORA_BD` y Karakali está congelado: el cambio de `BD.m` no les llega.
+- Las dinámicas con segmentadores de clasificador guardados pueden cambiar de total: en Turpial, la de depuración del
+  asegurado cambió y los demás totales de dinámicas no. Causa exacta sin confirmar; revisar qué clasificadores quedan
+  marcados, incluido `zOtros`, después de refrescar cada libro.
