@@ -1,0 +1,156 @@
+diff --git a/Consultas/BD.m b/Consultas/BD.m
+index 9a2bb48..2ddf465 100644
+--- a/Consultas/BD.m
++++ b/Consultas/BD.m
+@@ -81,7 +81,10 @@ let
+         {"Tipo",                 each try (if _ = null then "" else Text.Upper(Text.Trim(Text.From(_)))) otherwise "", type text},
+         {"# OC / Contrato",      each try (if _ = null then null else Text.Trim(Text.From(_))) otherwise null, type text},
+         {"Nombre Contratista",   each try FnCleanContratista(_) otherwise null, type text},
+-        {"Descripcion contrato", each try FnRemoveAccentsSymbols(if _ = null then null else Text.Trim(Text.From(_))) otherwise null, type text}
++        {"Descripcion contrato", each try FnRemoveAccentsSymbols(if _ = null then null else Text.Trim(Text.From(_))) otherwise null, type text},
++        // Comparativo en mayusculas (2026-11-03, regla del usuario): el mismo comparativo llegaba
++        // con distinta capitalizacion desde descargas, aprobaciones y Det_CC y salia en dos renglones.
++        {"# CC - Comparativo",   each try (if _ = null then null else Text.Upper(Text.Trim(Text.From(_)))) otherwise null, type text}
+     }, null, MissingField.Ignore),
+ 
+     // Buffer: FiltroTipoValido se usa 2 veces (ClasificadorRows y BaseClasificada) — sin buffer,
+@@ -98,11 +101,14 @@ let
+     //   1. APROBACIONES (filas CC CONSOLIDADO) por su comparativo (nombre completo
+     //      normalizado: el numero solo se repite, ej. 002 topografia / 002 ensayos), o por el
+     //      comparativo de su OC/contrato segun el puente comparativo<->OC de Det_CC.
+-    //   2. PROVISIONES: el de la propia fila de provision o el de las provisiones de su OC.
++    //   2. La fila de provision conserva el suyo, pero NO se le pasa a nadie (2026-11-03).
+     //   3. Det_CC (respaldo; la columna Clasificador de Det_CC se retira de los libros).
+-    //   4. Propagacion por CC|codigo act|insumo desde las filas ya clasificadas en 1-3
+-    //      (ITEMS, PPTO, POR ADJUDICAR, compras de insumos ya clasificados).
+-    //   5. En blanco.
++    //   4. ASEGURADO DE SINCO (contratos y OC, sin entradas ni salidas; regla del usuario 2026-11-03):
++    //      solo lo que venga de comparativos. Sin clasificador en su fila toma el mas frecuente
++    //      de las filas de asegurado de su misma OC; si no hay, "zOtros". Nada de provisiones.
++    //   5. Las demas filas: propagacion por CC|codigo act|insumo desde las filas ya clasificadas
++    //      en 1-3, sin contar provisiones (ITEMS, PPTO, POR ADJUDICAR, entradas y salidas).
++    //   6. En blanco.
+     FnBuscar = (rec as record, key as nullable text) as any =>
+         if key = null or key = "" then null else Record.FieldOrDefault(rec, key, null),
+     FnTieneTexto = (v as any) as logical =>
+@@ -131,7 +137,6 @@ let
+     FnClaveOCIns = (r as record) as nullable text =>
+         let k = FnOCKeyValida(r[#"# OC / Contrato"]) in if k = null or r[Ins] = "" then null else k & "|" & r[Ins],
+     ClasifAprobComp = FnMapaModa(FnFilasClasif("CC CONSOLIDADO"), FnClaveComp, "Clasificador"),
+-    ClasifProvOC    = FnMapaUnico(FnFilasClasif("PROVISIONES"), FnClaveOC, "Clasificador"),
+     ClasifDetComp   = FnMapaModa(FnFilasClasif("CC"), FnClaveComp, "Clasificador"),
+     ClasifDetOCIns  = FnMapaModa(FnFilasClasif("CC"), FnClaveOCIns, "Clasificador"),
+     ClasifDetOC     = FnMapaUnico(FnFilasClasif("CC"), FnClaveOC, "Clasificador"),
+@@ -153,14 +158,19 @@ let
+             a1 = if a0 <> null then a0 else FnBuscar(ClasifAprobComp, comp),
+             a2 = if a1 <> null then a1 else FnBuscar(ClasifAprobComp, compOC),
+             p1 = if a2 <> null then a2 else if [Tipo] = "PROVISIONES" then propio else null,
+-            p2 = if p1 <> null then p1 else FnBuscar(ClasifProvOC, ocK),
+-            d1 = if p2 <> null then p2 else FnBuscar(ClasifDetComp, comp),
++            d1 = if p1 <> null then p1 else FnBuscar(ClasifDetComp, comp),
+             d2 = if d1 <> null then d1 else FnBuscar(ClasifDetOCIns, ocIns),
+             d3 = if d2 <> null then d2 else FnBuscar(ClasifDetOC, ocK)
+         in d3, type text),
+-    ClasifPorIns = FnMapaModa(Table.SelectRows(Etapa1, each [__ClasifFinal] <> null), FnClaveIns, "__ClasifFinal"),
++    FnEsAsegurado = (r as record) as logical =>
++        r[Tipo] = "CONTRATO" or (r[Tipo] = "COMPRAS" and not FnTieneTexto(r[#"#ENTRADA"]) and not FnTieneTexto(r[#"#SALIDA"])),
++    ClasifAsegOC = FnMapaModa(Table.SelectRows(Etapa1, each [__ClasifFinal] <> null and FnEsAsegurado(_)), FnClaveOC, "__ClasifFinal"),
++    ClasifPorIns = FnMapaModa(Table.SelectRows(Etapa1, each [__ClasifFinal] <> null and [Tipo] <> "PROVISIONES"), FnClaveIns, "__ClasifFinal"),
+     BaseClasificada0 = Table.AddColumn(Etapa1, "__Clasif2", each
+-        if [__ClasifFinal] <> null then [__ClasifFinal] else FnBuscar(ClasifPorIns, FnClaveIns(_)), type text),
++        if [__ClasifFinal] <> null then [__ClasifFinal]
++        else if FnEsAsegurado(_) then
++            (let oc = FnBuscar(ClasifAsegOC, FnClaveOC(_)) in if oc <> null then oc else "zOtros")
++        else FnBuscar(ClasifPorIns, FnClaveIns(_)), type text),
+     BaseClasificada = Table.RenameColumns(
+         Table.RemoveColumns(BaseClasificada0, {"Clasificador", "__ClasifFinal"}), {{"__Clasif2", "Clasificador"}}),
+ 
+diff --git a/Consultas/COMPRAS.m b/Consultas/COMPRAS.m
+index 3f0ac81..4bf38dd 100644
+--- a/Consultas/COMPRAS.m
++++ b/Consultas/COMPRAS.m
+@@ -296,7 +296,15 @@ let
+         {"Codigo act", each FnFormatCodigoAct(_), type text}
+     }, null, MissingField.Ignore),
+ 
+-    Compras_Unicas = Table.Buffer(Table.Distinct(Expandido_Clean)),
++    // CRUCE POR CODIGO DE INSUMO (2026-11-03): el nombre cortado en el primer "(" confunde insumos distintos
++    // (MURO/PLACA, (210N)/(210N) TREMIE, (280N)/(280N) TREMIE, autobomba). El codigo manda; el nombre queda de
++    // respaldo para filas cuyo codigo no este en ITEMS. El codigo llega como texto o numero segun la fuente.
++    FnCodInsTxt = (v as any) as nullable text =>
++        let
++            n = try Number.From(v) otherwise null,
++            t = if v = null then "" else FnText(v)
++        in if n <> null then Text.From(n) else if t = "" then null else t,
++    Compras_Unicas = Table.Buffer(Table.AddColumn(Table.Distinct(Expandido_Clean), "CodInsTxt", each FnCodInsTxt([Codigo ins]), type nullable text)),
+ 
+     // ============================================================
+     // LECTURA DIRECTA DE CONSULTAS (Memoria)
+@@ -313,6 +321,8 @@ let
+ 
+     ITEMS_Insumos_Dist = Table.Buffer(Table.Distinct(Table.AddColumn(ITEMS_Base, "InsClave", each FnClaveLimpia([Ins]), type text), {"Centro de Costos", "Codigo act", "InsClave"})),
+     ITEMS_Respaldo = Table.Buffer(Table.Distinct(ITEMS_Insumos_Dist, {"Centro de Costos", "InsClave"})),
++    ITEMS_Cod_Dist = Table.Buffer(Table.Distinct(Table.SelectRows(Table.AddColumn(ITEMS_Base, "CodInsTxt", each FnCodInsTxt([Codigo ins]), type nullable text), each [CodInsTxt] <> null), {"Centro de Costos", "Codigo act", "CodInsTxt"})),
++    ITEMS_Cod_Respaldo = Table.Buffer(Table.Distinct(ITEMS_Cod_Dist, {"Centro de Costos", "CodInsTxt"})),
+ 
+     ItemsPorCodigo_Estricto = Table.Buffer(Table.Group(ITEMS_Base, {"Centro de Costos", "Codigo act"}, {
+         {"Act_Estricto", each List.First(List.RemoveNulls([Actividad])), type text},
+@@ -329,7 +339,13 @@ let
+     // ============================================================
+     // CRUCES FINALES
+     // ============================================================
+-    MergedExacto = Table.NestedJoin(Compras_Unicas, {"Centro de Costos", "Codigo act", "InsClave"}, ITEMS_Insumos_Dist, {"Centro de Costos", "Codigo act", "InsClave"}, "EXACTO", JoinKind.LeftOuter),
++    MergedCodExacto = Table.NestedJoin(Compras_Unicas, {"Centro de Costos", "Codigo act", "CodInsTxt"}, ITEMS_Cod_Dist, {"Centro de Costos", "Codigo act", "CodInsTxt"}, "COD_EXACTO", JoinKind.LeftOuter),
++    ExpandedCodExacto = Table.ExpandTableColumn(MergedCodExacto, "COD_EXACTO", {"Ins"}, {"ExC.Ins"}),
++
++    MergedCodRescate = Table.NestedJoin(ExpandedCodExacto, {"Centro de Costos", "CodInsTxt"}, ITEMS_Cod_Respaldo, {"Centro de Costos", "CodInsTxt"}, "COD_RESCATE", JoinKind.LeftOuter),
++    ExpandedCodRescate = Table.ExpandTableColumn(MergedCodRescate, "COD_RESCATE", {"Codigo act", "Ins"}, {"RsC.Codigo act", "RsC.Ins"}),
++
++    MergedExacto = Table.NestedJoin(ExpandedCodRescate, {"Centro de Costos", "Codigo act", "InsClave"}, ITEMS_Insumos_Dist, {"Centro de Costos", "Codigo act", "InsClave"}, "EXACTO", JoinKind.LeftOuter),
+     ExpandedExacto = Table.ExpandTableColumn(MergedExacto, "EXACTO", {"Ins"}, {"Ex.Ins"}),
+ 
+     MergedRescate = Table.NestedJoin(ExpandedExacto, {"Centro de Costos", "InsClave"}, ITEMS_Respaldo, {"Centro de Costos", "InsClave"}, "RESCATE", JoinKind.LeftOuter),
+@@ -343,8 +359,10 @@ let
+ 
+     AddedCoalesced = Table.AddColumn(ExpandedGenerico, "FinalCols", each
+         let
++            ec = [ExC.Ins] <> null,
++            rc = [RsC.Ins] <> null,
+             e = [Ex.Ins] <> null,
+-            ca = if [#"#ENTRADA"] <> null then null else if e then [Codigo act] else (if [Rs.Codigo act] <> null then [Rs.Codigo act] else [Codigo act]),
++            ca = if [#"#ENTRADA"] <> null then null else if ec then [Codigo act] else if rc then [RsC.Codigo act] else if e then [Codigo act] else (if [Rs.Codigo act] <> null then [Rs.Codigo act] else [Codigo act]),
+             a0 = FnText([Actividad]),
+             aOrig = if a0 = "" then null else if ca <> null and not Text.StartsWith(a0, Text.From(ca)) then Text.From(ca) & " - " & a0 else a0,
+ 
+@@ -352,14 +370,14 @@ let
+             CapFinal = if [#"#ENTRADA"] <> null then null else if [Cap_Estricto] <> null then [Cap_Estricto] else [Cap_Gen],
+             SubCapFinal = if [#"#ENTRADA"] <> null then null else if [Sub_Estricto] <> null then [Sub_Estricto] else [Sub_Gen]
+         in [
+-            InsFinal = if e then [Ex.Ins] else (if [Rs.Ins] <> null then [Rs.Ins] else [Ins]),
++            InsFinal = if ec then [ExC.Ins] else if rc then [RsC.Ins] else if e then [Ex.Ins] else (if [Rs.Ins] <> null then [Rs.Ins] else [Ins]),
+             CodActFinal = ca,
+             ActFinal = ActOficial,
+             CapFinal = CapFinal,
+             SubCapFinal = SubCapFinal
+         ]),
+ 
+-    ExpandedFinalCols = Table.ExpandRecordColumn(Table.RemoveColumns(AddedCoalesced, {"Ins", "Actividad", "Codigo act", "Ex.Ins", "Rs.Codigo act", "Rs.Actividad", "Rs.Ins", "Act_Estricto", "Cap_Estricto", "Sub_Estricto", "Act_Gen", "Cap_Gen", "Sub_Gen"}), "FinalCols", {"InsFinal", "CodActFinal", "ActFinal", "CapFinal", "SubCapFinal"}, {"Ins", "Codigo act", "Actividad", "Capitulo", "Subcapitulo"}),
++    ExpandedFinalCols = Table.ExpandRecordColumn(Table.RemoveColumns(AddedCoalesced, {"Ins", "Actividad", "Codigo act", "CodInsTxt", "ExC.Ins", "RsC.Codigo act", "RsC.Ins", "Ex.Ins","Rs.Codigo act", "Rs.Actividad", "Rs.Ins", "Act_Estricto", "Cap_Estricto", "Sub_Estricto", "Act_Gen", "Cap_Gen", "Sub_Gen"}), "FinalCols", {"InsFinal", "CodActFinal", "ActFinal", "CapFinal", "SubCapFinal"}, {"Ins", "Codigo act", "Actividad", "Capitulo", "Subcapitulo"}),
+ 
+     NumericColumns = Table.TransformColumns(ExpandedFinalCols, {
+         {"#ENTRADA", each FxToNumberFlex(_), Int64.Type},
+diff --git a/Consultas/TD3_OC.m b/Consultas/TD3_OC.m
+index 68f98c3..850e7e7 100644
+--- a/Consultas/TD3_OC.m
++++ b/Consultas/TD3_OC.m
+@@ -17,8 +17,8 @@ let
+         {"Tipo", each if List.Contains([Tipo], "CONTRATO") then "Contrato" else "Orden de compra", type text},
+         {"Centro de Costos", each FnModa([Centro de Costos]), type text},
+         {"Contratista", each FnModa([Nombre Contratista]), type text}}),
+-    // Clasificador: el mas frecuente entre TODAS las filas de la OC (BD ya lo trae desde aprobaciones)
+-    ClasifOC = Table.Group(Base, {"OC"}, {{"Clasificador", each FnModa([Clasificador]), type text}}),
++    // Clasificador: el mas frecuente entre las filas de la OC sin contar provisiones (regla del usuario 2026-11-03)
++    ClasifOC = Table.Group(Table.SelectRows(Base, each [Tipo] <> "PROVISIONES"), {"OC"}, {{"Clasificador", each FnModa([Clasificador]), type text}}),
+     Unido = Table.ExpandTableColumn(Table.NestedJoin(PorOC, {"OC"}, ClasifOC, {"OC"}, "C", JoinKind.LeftOuter), "C", {"Clasificador"}),
+     Final = Table.TransformColumns(Unido, {
+         {"Clasificador", each if _ = null then "(sin clasificador)" else _, type text},
