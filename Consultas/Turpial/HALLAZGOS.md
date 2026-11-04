@@ -42,7 +42,18 @@ Regla de Juan: contratos y órdenes de compra toman el clasificador solo de los 
 - `ComparativosContratados` compara el comparativo distinguiendo mayúsculas. Al unificarlas, más filas de `ADJUDICADO`
   coinciden y proyectan 0, lo que puede mover `VT Proyectado Colsubsidio`.
 - `CONTRATOS` usa la misma llave por nombre que tenía `COMPRAS`; falta verificar si tiene el mismo problema.
-- Versalles usa `ORA_BD` y Karakali está congelado: el cambio de `BD.m` no les llega.
+- Corrección 2026-11-04: Versalles sí recibe `BD.m` (`ORA_BD` parte de `BD_BASE = FxGitHub("BD")`). Karakali tiene `BD`
+  incrustada, pero `COMPRAS` y `TD3_OC` leen de GitHub, así que esos dos sí le llegan.
+- Pedido de Juan, en pausa: una sola versión de las consultas para todos los libros de SINCO, sin carpeta `Turpial/`.
+  Pasar el código a `Consultas/` llega a esos libros en su próximo refresco; se hace solo cuando Juan lo autorice.
+
+## 2026-11-04
+
+### El libro volvía a la versión anterior
+- Excel abre la ruta sincronizada como documento de SharePoint: `FullName` es la URL y usa su propia caché. No aparece `~$`
+  aunque el libro esté abierto, así que esa comprobación no sirve en esta carpeta.
+- Reemplazar el archivo por fuera con una copia se perdió 2 veces. Causa probable; falta confirmar que no se repite.
+- Método vigente: abrir el libro en Excel, editar ahí y guardar desde Excel (`Save`).
 - Las dinámicas con segmentadores de clasificador guardados cambian de total si sus OC cambian de clasificador. En
   Turpial, la de depuración del asegurado quedó guardada solo con un clasificador marcado y por eso fue la única que
   cambió. Revisar en cada libro qué clasificadores quedan marcados y que `zOtros` se vea donde haga falta.
