@@ -68,7 +68,7 @@ let
                 Insumos = Table.SelectRows(FD, each [Clase] = "Insumo" and [ActCod] <> null and [ActCod] <> ""),
                 Datos = Table.FromRecords(Table.TransformRows(Insumos, (r) => [
                     ACTIVIDAD = r[ActCod],
-                    INSUMO = Limpiar(r[Columna2]),
+                    INSUMO = Text.Trim(Text.Replace(Limpiar(r[Columna2]), "160;", "")),
                     PresCant = FxNum(r[Columna5]),
                     PresVrU = FxNum(r[Columna6]),
                     ProyCant = FxNum(r[Columna8]),
