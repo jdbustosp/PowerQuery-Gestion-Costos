@@ -379,11 +379,12 @@ let
 
 
     // ===== 5. Insumo oficial (nombre del SEGUIMIENTO) y totales por fila =====
-    ConInsumo = Table.NestedJoin(ContratosValidos, {"Centro de Costos", "CodigoAct", "InsClave_Cruce"}, MaestroInsumosDist, {"Centro de Costos", "Codigo act", "InsClave_Cruce"}, "INS", JoinKind.LeftOuter),
+    // El orden se fija antes de los cruces (no lo conservan): de el sale la cantidad del grupo
+    ContratosOrden = Table.AddIndexColumn(ContratosValidos, "__Orden", 0, 1),
+    ConInsumo = Table.NestedJoin(ContratosOrden, {"Centro de Costos", "CodigoAct", "InsClave_Cruce"}, MaestroInsumosDist, {"Centro de Costos", "Codigo act", "InsClave_Cruce"}, "INS", JoinKind.LeftOuter),
     ExpInsumo = Table.ExpandTableColumn(ConInsumo, "INS", {"Ref.InsOficial"}, {"Ref.InsOficial"}),
     ConJerarquia = Table.NestedJoin(ExpInsumo, {"Centro de Costos", "CodigoAct"}, MaestroJerarquia, {"Centro de Costos", "Codigo act"}, "JER", JoinKind.LeftOuter),
-    ExpJerarquia = Table.ExpandTableColumn(ConJerarquia, "JER", {"Ref.Act"}, {"Ref.Act"}),
-    ConIndice = Table.AddIndexColumn(ExpJerarquia, "__Orden", 0, 1),
+    ConIndice = Table.ExpandTableColumn(ConJerarquia, "JER", {"Ref.Act"}, {"Ref.Act"}),
 
     Filas = Table.FromRecords(Table.TransformRows(ConIndice, (r) =>
         let
