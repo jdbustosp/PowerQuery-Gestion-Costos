@@ -635,7 +635,8 @@ let
     //   Factura, Invertido factura: filas nuevas Tipo FACTURA (una por OC + factura, con saldo "(sin factura)").
     //   No_Prov OC: todas las provisiones de la OC en un texto; filtrar por el no quita asegurado a la OC.
     //   Clasif desperdicio, Contratista almacen: para la dinamica de desperdicios; el teorico lleva "(TEORICO)".
-    // Las filas FACTURA solo llenan Invertido factura. En los segmentadores Tipo de las otras dinamicas van desmarcadas.
+    // Las filas FACTURA llenan Invertido factura y el reparto de asegurado y comparativos por factura (suma 0 por OC).
+    // En los segmentadores Tipo de las otras dinamicas van desmarcadas.
     // ============================================================
     FnOCDin = (v as any) as text => Text.Select(FnTextoODef(v), {"0".."9"}),
     FnModaTxt = (l as list) as nullable text =>
@@ -737,11 +738,28 @@ let
     ParesFactProv = Table.Distinct(Table.SelectColumns(Table.SelectRows(ConSeg, each [Fila real] = null and [Factura] <> "(sin factura)"),
         {"OC", "Factura", "No_Prov seg", "Tipo OC", "CC OC", "Contratista OC", "Clasificador OC"})),
     InvPorFactura = Table.Group(Table.SelectRows(ConSeg, each [Tipo] = "FACTURA" and [Factura] <> "(sin factura)"), {"OC", "Factura"}, {{"Inv prov", each List.Sum([Invertido factura]), type number}}),
-    FilasProvFact = Table.ExpandTableColumn(Table.NestedJoin(ParesFactProv, {"OC", "Factura"}, InvPorFactura, {"OC", "Factura"}, "V", JoinKind.Inner), "V", {"Inv prov"}),
-    RepartidoProv = Table.Group(FilasProvFact, {"OC", "No_Prov seg"}, {{"__Rep", each List.Sum([Inv prov]), type number}}),
-    FilasProvResto = Table.RemoveColumns(Table.ReplaceValue(
-        Table.ExpandTableColumn(Table.NestedJoin(FilasProvOC, {"OC", "No_Prov seg"}, RepartidoProv, {"OC", "No_Prov seg"}, "R", JoinKind.LeftOuter), "R", {"__Rep"}),
-        each [Inv prov], each (if [Inv prov] = null then 0 else [Inv prov]) - (if [__Rep] = null then 0 else [__Rep]), Replacer.ReplaceValue, {"Inv prov"}), {"__Rep"}),
+    // Asegurado y comparativos por factura: SINCO no los asigna por factura, se reparten segun las entradas de cada una.
+    // Si las facturas pasan del valor de la OC, a prorrata; lo no repartido queda en (sin factura). El total de la OC no cambia.
+    SumaFactOC = Table.Buffer(Table.Group(InvPorFactura, {"OC"}, {{"__S", each List.Sum([Inv prov]), type number}})),
+    ValoresOCB = Table.Buffer(ValoresOC),
+    MapaSumaFact = Record.FromList(SumaFactOC[__S], SumaFactOC[OC]),
+    MapaAseg = Record.FromList(ValoresOCB[Aseg prov], ValoresOCB[OC]),
+    MapaComp = Record.FromList(ValoresOCB[Comp prov], ValoresOCB[OC]),
+    FnFactorOC = (mapa as record, oc as text) as number =>
+        let v = Record.FieldOrDefault(mapa, oc, null), s = Record.FieldOrDefault(MapaSumaFact, oc, null)
+        in if v = null or s = null or v <= 0 or s <= 0 then 0 else List.Min({1, v / s}),
+    FnNz = (n as nullable number) as number => if n = null then 0 else n,
+    FilasProvFact0 = Table.ExpandTableColumn(Table.NestedJoin(ParesFactProv, {"OC", "Factura"}, InvPorFactura, {"OC", "Factura"}, "V", JoinKind.Inner), "V", {"Inv prov"}),
+    FilasProvFact = Table.AddColumn(Table.AddColumn(FilasProvFact0,
+        "Aseg prov", each FnNz([Inv prov]) * FnFactorOC(MapaAseg, [OC]), type number),
+        "Comp prov", each FnNz([Inv prov]) * FnFactorOC(MapaComp, [OC]), type number),
+    RepartidoProv = Table.Group(FilasProvFact, {"OC", "No_Prov seg"}, {
+        {"__Rep", each List.Sum([Inv prov]), type number}, {"__RepA", each List.Sum([Aseg prov]), type number}, {"__RepC", each List.Sum([Comp prov]), type number}}),
+    FnResta = (tabla as table, col as text, rep as text) as table =>
+        Table.ReplaceValue(tabla, each Record.Field(_, col), each FnNz(Record.Field(_, col)) - FnNz(Record.Field(_, rep)), Replacer.ReplaceValue, {col}),
+    FilasProvResto = Table.RemoveColumns(FnResta(FnResta(FnResta(
+        Table.ExpandTableColumn(Table.NestedJoin(FilasProvOC, {"OC", "No_Prov seg"}, RepartidoProv, {"OC", "No_Prov seg"}, "R", JoinKind.LeftOuter), "R", {"__Rep", "__RepA", "__RepC"}),
+        "Inv prov", "__Rep"), "Aseg prov", "__RepA"), "Comp prov", "__RepC"), {"__Rep", "__RepA", "__RepC"}),
     FilasProvBase = Table.Combine({Table.AddColumn(FilasProvResto, "Factura", each "(sin factura)", type text), FilasProvFact}),
     // Teorico: se repite por contratista para que siga visible al filtrar uno.
     TeoClaves = Table.Group(Table.SelectRows(ConSeg, each [Tipo] = "TEORICO" and [Clasif desperdicio] <> "(no aplica)"),
@@ -754,7 +772,19 @@ let
     FilasProv = Table.AddColumn(FnApoyo(Table.AddColumn(FilasProvBase, "Centro de Costos", each FnCCOC([OC]), type text), [Tipo = "FACTURA", #"# CC - Comparativo" = "SIN CUADRO COMPARATIVO",
         #"Clasif desperdicio" = "(no aplica)", #"Contratista almacen" = "(no aplica)"]), "# OC / Contrato", each [OC], type text),
     FilasTeo = FnApoyo(FilasTeoBase, [Tipo = "FACTURA", #"# CC - Comparativo" = "SIN CUADRO COMPARATIVO", #"Tipo OC" = "(no aplica)", #"No_Prov seg" = "(otros registros)", #"Fila real" = 1]),
-    ConApoyo = Table.Combine({ConSeg, FilasProv, FilasTeo}),
+    // Sin filtro de provision: la factura recibe su parte y la fila (sin factura) de la OC la descuenta (suma 0 por OC).
+    FnEsFactura = (r as record) as logical => r[Tipo] = "FACTURA" and r[OC] <> null and r[Factura] <> "(sin factura)",
+    FnReparte = (tabla as table, col as text, mapa as record) as table =>
+        Table.ReplaceValue(tabla, each Record.Field(_, col), each if FnEsFactura(_) then FnNz([Invertido factura]) * FnFactorOC(mapa, [OC]) else Record.Field(_, col), Replacer.ReplaceValue, {col}),
+    ConSegRep = FnReparte(FnReparte(ConSeg, "VT Asegurada", MapaAseg), "VR total aprobacion", MapaComp),
+    RestoBase = Table.Distinct(Table.RemoveColumns(Table.SelectRows(ConSeg, FnEsFactura), {"VT Asegurada", "VR total aprobacion", "Invertido factura", "Factura"}), {"OC"}),
+    FnMontoResto = (oc as text, mapa as record) as number => - FnNz(Record.FieldOrDefault(MapaSumaFact, oc, null)) * FnFactorOC(mapa, oc),
+    FilasResto = Table.SelectRows(Table.AddColumn(Table.AddColumn(Table.AddColumn(RestoBase,
+        "Factura", each "(sin factura)", type text),
+        "VT Asegurada", each FnMontoResto([OC], MapaAseg), type number),
+        "VR total aprobacion", each FnMontoResto([OC], MapaComp), type number),
+        each [VT Asegurada] <> 0 or [VR total aprobacion] <> 0),
+    ConApoyo = Table.Combine({ConSegRep, FilasResto, FilasProv, FilasTeo}),
     FinalRecortada = Table.SelectColumns(ConApoyo, ColumnasFinalesArboleda & {"OC", "Tipo OC", "CC OC", "Contratista OC", "Clasificador OC", "Factura", "Invertido factura", "No_Prov seg", "Fila real", "Aseg prov", "Comp prov", "Inv prov", "Desc prov", "Teorico fijo", "Clasif desperdicio", "Contratista almacen", "VT Adicionales",
         "Cant. entradas", "Cant. salidas", "Cant. teorica", "Material", "Tipologia", "TipoElemento", "Piso"}, MissingField.UseNull),
 
