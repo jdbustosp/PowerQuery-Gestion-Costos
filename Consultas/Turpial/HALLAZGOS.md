@@ -57,3 +57,18 @@ Regla de Juan: contratos y órdenes de compra toman el clasificador solo de los 
 - Las dinámicas con segmentadores de clasificador guardados cambian de total si sus OC cambian de clasificador. En
   Turpial, la de depuración del asegurado quedó guardada solo con un clasificador marcado y por eso fue la única que
   cambió. Revisar en cada libro qué clasificadores quedan marcados y que `zOtros` se vea donde haga falta.
+
+### Todo desde BD, sin modelo de datos (Turpial)
+- `TablaDinámica3` y `TD_DESPERDICIOS` ya no usan Power Pivot: leen la tabla BD. Una dinámica del modelo no cambia de
+  caché: se borra y se recrea en la misma celda, con su nombre, títulos y segmentadores.
+- BD trae ahora las facturas por OC (filas Tipo `FACTURA`) y filas de apoyo. Las demás dinámicas, `TablaDinámica4` y la
+  consulta `SINCO` las excluyen.
+- Filtrar una provisión sin combinar botones: una OC tiene varias provisiones, así que cada par OC-provisión lleva los
+  valores de la OC en columnas aparte (`Aseg prov`, `Comp prov`, `Inv prov`, `Desc prov`). Un campo calculado las usa
+  solo cuando el filtro deja fuera las filas reales (`Fila real`). El teórico hace lo mismo con `Teorico fijo`.
+- Límite: con varias provisiones marcadas, una OC que tenga ambas se cuenta doble en asegurado y entradas; con varios
+  contratistas de almacén marcados, el teórico se multiplica. Con una sola selección da igual que el modelo de datos.
+- `SINCO` está incrustada en el libro y lee la tabla BD (`SINCO.m` en esta carpeta es copia de registro). Así el
+  refresco baja de unos 150 s a unos 65 s porque BD se calcula una vez.
+- Al unificar las consultas: estas columnas y filas llegarían a los otros libros, y sus dinámicas tendrían que excluir
+  `FACTURA` igual que Turpial.

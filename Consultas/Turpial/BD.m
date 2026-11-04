@@ -69,7 +69,7 @@ let
         "Codigo ins", "V/U Comprado", "V/U Contratado", "V/U Presupuesto",
         "VT Cons Cols",
         "Estado", "Fecha_de_pago", "Clasificador_Actividad",
-        "Capitulo_Costo directo", "NIT", "No_Factura", "Fecha_Factura"
+        "Capitulo_Costo directo", "Fecha_Factura"
     }, MissingField.Ignore),
 
     // try/otherwise en cada transformacion: si Text.From recibe algo raro (record, list, etc) no rompe
@@ -628,7 +628,121 @@ let
         {{"CantTotal", "Cant. teorica"}}),
     ConTeorico = Table.Combine({ConAlmacen, TeoFilas}),
 
-    FinalRecortada = Table.SelectColumns(ConTeorico, ColumnasFinalesArboleda & {"VT Adicionales",
+    // ============================================================
+    // DINAMICAS SIN MODELO DE DATOS (2026-11-04, pedido del usuario: todo sale de BD).
+    // Lo que antes hacian las tablas TD3_* del modelo queda en columnas de esta tabla:
+    //   OC, Tipo OC, CC OC, Contratista OC, Clasificador OC: uno por OC, en todas las filas de la OC.
+    //   Factura, Invertido factura: filas nuevas Tipo FACTURA (una por OC + factura, con saldo "(sin factura)").
+    //   No_Prov OC: todas las provisiones de la OC en un texto; filtrar por el no quita asegurado a la OC.
+    //   Clasif desperdicio, Contratista almacen: para la dinamica de desperdicios; el teorico lleva "(TEORICO)".
+    // Las filas FACTURA solo llenan Invertido factura. En los segmentadores Tipo de las otras dinamicas van desmarcadas.
+    // ============================================================
+    FnOCDin = (v as any) as text => Text.Select(FnTextoODef(v), {"0".."9"}),
+    FnModaTxt = (l as list) as nullable text =>
+        let x = List.Select(List.Transform(l, FnTextoODef), each _ <> "") in if List.IsEmpty(x) then null else List.Mode(x),
+    FnNITDin = (v as any) as text => let d = FnOCDin(v) in if Text.Length(d) = 10 and List.Contains({"8", "9"}, Text.Start(d, 1)) then Text.Start(d, 9) else d,
+    FnFacturaDin = (v as any) as text => Text.TrimStart(Text.Select(Text.Upper(FnTextoODef(v)), {"A".."Z", "0".."9"}), "0"),
+    FnSumaDin = (l as list) as number => List.Sum(List.Transform(l, each let n = FnNumONull(_) in if n = null then 0 else n)),
+    ConOCd = Table.Buffer(Table.AddColumn(ConTeorico, "__OC", each FnOCDin([#"# OC / Contrato"]), type text)),
+    FilasOC = Table.SelectRows(ConOCd, each [__OC] <> ""),
+    DimOC = Table.Group(Table.SelectRows(FilasOC, each [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS"), {"__OC"}, {
+        {"Tipo OC", each if List.Contains([Tipo], "CONTRATO") then "Contrato" else "Orden de compra", type text},
+        {"CC OC", each FnModaTxt([Centro de Costos]), type text},
+        {"Contratista OC", each let c = FnModaTxt([Nombre Contratista]) in if c = null then "(sin contratista)" else c, type text}}),
+    ClasifDin = Table.Group(Table.SelectRows(FilasOC, each [Tipo] <> "PROVISIONES"), {"__OC"}, {{"Clasificador OC", each FnModaTxt([Clasificador]), type text}}),
+    DimOCCompleta = Table.Buffer(Table.TransformColumns(
+        Table.ExpandTableColumn(Table.NestedJoin(DimOC, {"__OC"}, ClasifDin, {"__OC"}, "C", JoinKind.LeftOuter), "C", {"Clasificador OC"}),
+        {{"Clasificador OC", each if _ = null then "(sin clasificador)" else _, type text}})),
+    OCsValidas = List.Buffer(DimOCCompleta[__OC]),
+    // Facturas de SINCO por OC + factura
+    FactVacia = #table(type table [OC = text, NIT = text, Factura = text, Valor = number, FacturaClave = text], {}),
+    FactTodas = Table.Buffer(try SINCO_FACTURAS otherwise FactVacia),
+    FactSinco = Table.SelectRows(FactTodas, each [OC] <> "" and List.Contains(OCsValidas, [OC])),
+    MapaFactOC = let
+            t = Table.SelectRows(Table.AddColumn(FactTodas, "__K", each FnNITDin([NIT]) & "|" & [FacturaClave], type text), each [FacturaClave] <> ""),
+            g = Table.Group(t, {"__K"}, {{"OC", each List.Mode([OC]), type text}})
+        in Record.FromList(g[OC], g[__K]),
+    PorFactura = Table.Group(FactSinco, {"OC", "FacturaClave"}, {
+        {"Factura", each List.First(List.Select([Factura], each _ <> "" and _ <> null), "(sin factura)"), type text},
+        {"Invertido factura", each List.Sum([Valor]), type number}}),
+    TextoFactura = Record.FromList(PorFactura[Factura], List.Transform(Table.ToRecords(PorFactura), each [OC] & "|" & [FacturaClave])),
+    // Saldo: invertido de la OC (VT Cortes) que ninguna factura explica, para que las facturas sumen el invertido
+    InvertidoOC = Table.Group(FilasOC, {"__OC"}, {{"__Inv", each FnSumaDin([VT Cortes]), type number}}),
+    FacturadoOC = Table.Group(PorFactura, {"OC"}, {{"__Fact", each List.Sum([Invertido factura]), type number}}),
+    SaldoDin = Table.SelectRows(Table.AddColumn(
+        Table.ExpandTableColumn(Table.NestedJoin(
+            Table.SelectRows(InvertidoOC, each List.Contains(OCsValidas, [__OC])), {"__OC"}, FacturadoOC, {"OC"}, "F", JoinKind.LeftOuter), "F", {"__Fact"}),
+        "__Dif", each [__Inv] - (if [__Fact] = null then 0 else [__Fact]), type number), each Number.Abs([__Dif]) >= 1),
+    FilasFacturaBase = Table.Combine({
+        Table.SelectColumns(Table.SelectRows(PorFactura, each [FacturaClave] <> ""), {"OC", "Factura", "Invertido factura"}),
+        Table.Group(Table.Combine({
+            Table.SelectColumns(Table.TransformColumns(Table.SelectRows(PorFactura, each [FacturaClave] = ""), {{"Factura", each "(sin factura)", type text}}), {"OC", "Factura", "Invertido factura"}),
+            Table.FromRecords(List.Transform(Table.ToRecords(SaldoDin), (r) => [OC = r[__OC], Factura = "(sin factura)", #"Invertido factura" = r[__Dif]]),
+                type table [OC = text, Factura = text, #"Invertido factura" = number])}),
+            {"OC", "Factura"}, {{"Invertido factura", each List.Sum([Invertido factura]), type number}})}),
+    FilasFactura = Table.AddColumn(Table.AddColumn(Table.AddColumn(Table.AddColumn(FilasFacturaBase,
+        "Tipo", each "FACTURA", type text),
+        "# OC / Contrato", each [OC], type text),
+        // Centro de Costos propio: la dinamica sin segmentador Tipo oculta este item.
+        "Centro de Costos", each "(FACTURA)", type text),
+        "# CC - Comparativo", each "SIN CUADRO COMPARATIVO", type text),
+    ConFacturas = Table.Combine({ConOCd, Table.AddColumn(FilasFactura, "__OC", each [OC], type text)}),
+    // OC y factura de cada fila. Provision: la OC que dice si existe en SINCO; si no, la de SINCO por NIT + factura.
+    ConUbicacion = Table.AddColumn(ConFacturas, "__U", each
+        if [Tipo] = "FACTURA" then [O = [OC], F = [Factura]]
+        else if [Tipo] = "PROVISIONES" then
+            let
+                clave = FnFacturaDin([No_Factura]),
+                ocS = if clave = "" then null else Record.FieldOrDefault(MapaFactOC, FnNITDin([NIT]) & "|" & clave, null),
+                oc = if List.Contains(OCsValidas, [__OC]) then [__OC] else if ocS <> null and List.Contains(OCsValidas, ocS) then ocS else null
+            in [O = oc, F = if clave = "" then "(sin factura)"
+                    else Record.FieldOrDefault(TextoFactura, (if oc = null then "" else oc) & "|" & clave, FnTextoODef([No_Factura]))]
+        else [O = if List.Contains(OCsValidas, [__OC]) then [__OC] else null, F = "(sin factura)"]),
+    Ubicadas = Table.Buffer(Table.AddColumn(Table.AddColumn(
+        Table.RemoveColumns(ConUbicacion, {"OC", "Factura"}, MissingField.Ignore),
+        "OC", each [__U][O], type text), "Factura", each if [__U][O] = null then null else [__U][F], type text)),
+    NoProvPorOC = Table.Group(Table.SelectRows(Ubicadas, each [OC] <> null and FnTieneTexto([No_Prov])), {"OC"}, {
+        {"No_Prov OC", each Text.Combine(List.Sort(List.Distinct(List.Transform([No_Prov], each Text.From(try Int64.From(Number.From(_)) otherwise _))), each try Number.From(_) otherwise 0), " | "), type text}}),
+    ConDimOC = Table.ExpandTableColumn(Table.NestedJoin(Ubicadas, {"OC"}, DimOCCompleta, {"__OC"}, "D", JoinKind.LeftOuter),
+        "D", {"Tipo OC", "CC OC", "Contratista OC", "Clasificador OC"}),
+    ConNoProv = Table.ExpandTableColumn(Table.NestedJoin(ConDimOC, {"OC"}, NoProvPorOC, {"OC"}, "N", JoinKind.LeftOuter), "N", {"No_Prov OC"}),
+    // Las filas fuera de la dinamica de contratos llevan "(no aplica)": ese item va oculto en la dinamica.
+    InsSinDesperdicio = {"T_TRANSPORTE CONCRETO (M3)"},
+    ConSal = Table.AddColumn(ConNoProv, "__Sal", each [Tipo] = "COMPRAS" and FnTieneTexto([#"#SALIDA"]), type logical),
+    ConDesp = Table.AddColumn(Table.AddColumn(ConSal,
+        "Clasif desperdicio", each if ([Tipo] = "TEORICO" or [__Sal]) and not List.Contains(InsSinDesperdicio, FnTextoODef([Ins])) then [Clasificador] else "(no aplica)", type text),
+        "Contratista almacen", each if [Tipo] = "TEORICO" then "(TEORICO)" else if [__Sal] then [Nombre Contratista] else "(no aplica)", type text),
+    ConSinProv = Table.TransformColumns(ConDesp, {{"Tipo OC", each if _ = null then "(no aplica)" else _, type text}}),
+    ConProvTxt = Table.AddColumn(Table.RenameColumns(ConSinProv, {{"No_Prov OC", "__NP"}}), "No_Prov OC", each
+        if [OC] = null then null else if [__NP] = null then "(sin provision)" else [__NP], type text),
+    // FILAS DE APOYO PARA FILTRAR SIN MODELO DE DATOS (Tipo FACTURA: las demas dinamicas ya lo excluyen).
+    // Provision: una OC puede tener varias, asi que cada par OC-provision repite los valores de la OC en columnas aparte.
+    // La dinamica usa esas columnas solo cuando el filtro deja fuera las filas reales (campo calculado con "Fila real").
+    ConSeg = Table.AddColumn(Table.AddColumn(ConProvTxt,
+        "No_Prov seg", each if [Tipo] = "PROVISIONES" and [OC] <> null and FnTieneTexto([No_Prov]) then Text.From(try Int64.From(Number.From([No_Prov])) otherwise [No_Prov])
+            else if [No_Prov OC] = "(sin provision)" then "(sin provision)" else "(otros registros)", type text),
+        "Fila real", each if [Tipo] = "PROVISIONES" and [OC] <> null and FnTieneTexto([No_Prov]) then null else 1, Int64.Type),
+    ValoresOC = Table.Group(Table.SelectRows(ConSeg, each [OC] <> null), {"OC"}, {
+        {"Aseg prov", each List.Sum([VT Asegurada]), type number},
+        {"Comp prov", each List.Sum([VR total aprobacion]), type number},
+        {"Inv prov", each List.Sum([Invertido factura]), type number},
+        {"Desc prov", each List.Sum([Valor descuento]), type number}}),
+    ParesOCProv = Table.Distinct(Table.SelectColumns(Table.SelectRows(ConSeg, each [Fila real] = null),
+        {"OC", "No_Prov seg", "Tipo OC", "CC OC", "Contratista OC", "Clasificador OC"})),
+    FilasProvBase = Table.ExpandTableColumn(Table.NestedJoin(ParesOCProv, {"OC"}, ValoresOC, {"OC"}, "V", JoinKind.LeftOuter), "V", {"Aseg prov", "Comp prov", "Inv prov", "Desc prov"}),
+    // Teorico: se repite por contratista para que siga visible al filtrar uno.
+    TeoClaves = Table.Group(Table.SelectRows(ConSeg, each [Tipo] = "TEORICO" and [Clasif desperdicio] <> "(no aplica)"),
+        {"Clasif desperdicio", "Ins", "Tipologia", "TipoElemento"}, {{"Teorico fijo", each List.Sum([Cant. teorica]), type number}}),
+    ContratistasSal = List.Buffer(List.RemoveNulls(List.Distinct(Table.SelectRows(ConSeg, each [__Sal] = true and [Clasif desperdicio] <> "(no aplica)")[Contratista almacen]))),
+    FilasTeoBase = Table.AddColumn(Table.ExpandListColumn(Table.AddColumn(TeoClaves, "Contratista almacen", each ContratistasSal), "Contratista almacen"),
+        "Clasificador", each [Clasif desperdicio], type text),
+    FnApoyo = (tabla as table, valores as record) as table =>
+        List.Accumulate(Record.FieldNames(valores), tabla, (st, c) => Table.AddColumn(st, c, each Record.Field(valores, c))),
+    FilasProv = Table.AddColumn(FnApoyo(FilasProvBase, [Tipo = "FACTURA", #"Centro de Costos" = "(FACTURA)", #"# CC - Comparativo" = "SIN CUADRO COMPARATIVO",
+        Factura = "(sin factura)", #"Clasif desperdicio" = "(no aplica)", #"Contratista almacen" = "(no aplica)"]), "# OC / Contrato", each [OC], type text),
+    FilasTeo = FnApoyo(FilasTeoBase, [Tipo = "FACTURA", #"Centro de Costos" = "(FACTURA)", #"# CC - Comparativo" = "SIN CUADRO COMPARATIVO", #"Tipo OC" = "(no aplica)", #"No_Prov seg" = "(otros registros)", #"Fila real" = 1]),
+    ConApoyo = Table.Combine({ConSeg, FilasProv, FilasTeo}),
+    FinalRecortada = Table.SelectColumns(ConApoyo, ColumnasFinalesArboleda & {"OC", "Tipo OC", "CC OC", "Contratista OC", "Clasificador OC", "Factura", "Invertido factura", "No_Prov seg", "Fila real", "Aseg prov", "Comp prov", "Inv prov", "Desc prov", "Teorico fijo", "Clasif desperdicio", "Contratista almacen", "VT Adicionales",
         "Cant. entradas", "Cant. salidas", "Cant. teorica", "Material", "Tipologia", "TipoElemento", "Piso"}, MissingField.UseNull),
 
     TablaMaestraFinal = Table.Buffer(FinalRecortada)
