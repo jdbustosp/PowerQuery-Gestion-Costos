@@ -654,6 +654,10 @@ let
         Table.ExpandTableColumn(Table.NestedJoin(DimOC, {"__OC"}, ClasifDin, {"__OC"}, "C", JoinKind.LeftOuter), "C", {"Clasificador OC"}),
         {{"Clasificador OC", each if _ = null then "(sin clasificador)" else _, type text}})),
     OCsValidas = List.Buffer(DimOCCompleta[__OC]),
+    // Centro de costos real de cada OC; las filas de apoyo nunca llevan uno inventado.
+    CCProyecto = FnModaTxt(ConTeorico[Centro de Costos]),
+    MapaCCOC = Record.FromList(DimOCCompleta[CC OC], DimOCCompleta[__OC]),
+    FnCCOC = (oc as nullable text) as nullable text => let c = if oc = null then null else Record.FieldOrDefault(MapaCCOC, oc, null) in if c = null then CCProyecto else c,
     // Facturas de SINCO por OC + factura
     FactVacia = #table(type table [OC = text, NIT = text, Factura = text, Valor = number, FacturaClave = text], {}),
     FactTodas = Table.Buffer(try SINCO_FACTURAS otherwise FactVacia),
@@ -683,8 +687,7 @@ let
     FilasFactura = Table.AddColumn(Table.AddColumn(Table.AddColumn(Table.AddColumn(FilasFacturaBase,
         "Tipo", each "FACTURA", type text),
         "# OC / Contrato", each [OC], type text),
-        // Centro de Costos propio: la dinamica sin segmentador Tipo oculta este item.
-        "Centro de Costos", each "(FACTURA)", type text),
+        "Centro de Costos", each FnCCOC([OC]), type text),
         "# CC - Comparativo", each "SIN CUADRO COMPARATIVO", type text),
     ConFacturas = Table.Combine({ConOCd, Table.AddColumn(FilasFactura, "__OC", each [OC], type text)}),
     // OC y factura de cada fila. Provision: la OC que dice si existe en SINCO; si no, la de SINCO por NIT + factura.
@@ -732,15 +735,15 @@ let
     FilasProvBase = Table.ExpandTableColumn(Table.NestedJoin(ParesOCProv, {"OC"}, ValoresOC, {"OC"}, "V", JoinKind.LeftOuter), "V", {"Aseg prov", "Comp prov", "Inv prov", "Desc prov"}),
     // Teorico: se repite por contratista para que siga visible al filtrar uno.
     TeoClaves = Table.Group(Table.SelectRows(ConSeg, each [Tipo] = "TEORICO" and [Clasif desperdicio] <> "(no aplica)"),
-        {"Clasif desperdicio", "Ins", "Tipologia", "TipoElemento"}, {{"Teorico fijo", each List.Sum([Cant. teorica]), type number}}),
+        {"Centro de Costos", "Clasif desperdicio", "Ins", "Tipologia", "TipoElemento"}, {{"Teorico fijo", each List.Sum([Cant. teorica]), type number}}),
     ContratistasSal = List.Buffer(List.RemoveNulls(List.Distinct(Table.SelectRows(ConSeg, each [__Sal] = true and [Clasif desperdicio] <> "(no aplica)")[Contratista almacen]))),
     FilasTeoBase = Table.AddColumn(Table.ExpandListColumn(Table.AddColumn(TeoClaves, "Contratista almacen", each ContratistasSal), "Contratista almacen"),
         "Clasificador", each [Clasif desperdicio], type text),
     FnApoyo = (tabla as table, valores as record) as table =>
         List.Accumulate(Record.FieldNames(valores), tabla, (st, c) => Table.AddColumn(st, c, each Record.Field(valores, c))),
-    FilasProv = Table.AddColumn(FnApoyo(FilasProvBase, [Tipo = "FACTURA", #"Centro de Costos" = "(FACTURA)", #"# CC - Comparativo" = "SIN CUADRO COMPARATIVO",
+    FilasProv = Table.AddColumn(FnApoyo(Table.AddColumn(FilasProvBase, "Centro de Costos", each FnCCOC([OC]), type text), [Tipo = "FACTURA", #"# CC - Comparativo" = "SIN CUADRO COMPARATIVO",
         Factura = "(sin factura)", #"Clasif desperdicio" = "(no aplica)", #"Contratista almacen" = "(no aplica)"]), "# OC / Contrato", each [OC], type text),
-    FilasTeo = FnApoyo(FilasTeoBase, [Tipo = "FACTURA", #"Centro de Costos" = "(FACTURA)", #"# CC - Comparativo" = "SIN CUADRO COMPARATIVO", #"Tipo OC" = "(no aplica)", #"No_Prov seg" = "(otros registros)", #"Fila real" = 1]),
+    FilasTeo = FnApoyo(FilasTeoBase, [Tipo = "FACTURA", #"# CC - Comparativo" = "SIN CUADRO COMPARATIVO", #"Tipo OC" = "(no aplica)", #"No_Prov seg" = "(otros registros)", #"Fila real" = 1]),
     ConApoyo = Table.Combine({ConSeg, FilasProv, FilasTeo}),
     FinalRecortada = Table.SelectColumns(ConApoyo, ColumnasFinalesArboleda & {"OC", "Tipo OC", "CC OC", "Contratista OC", "Clasificador OC", "Factura", "Invertido factura", "No_Prov seg", "Fila real", "Aseg prov", "Comp prov", "Inv prov", "Desc prov", "Teorico fijo", "Clasif desperdicio", "Contratista almacen", "VT Adicionales",
         "Cant. entradas", "Cant. salidas", "Cant. teorica", "Material", "Tipologia", "TipoElemento", "Piso"}, MissingField.UseNull),

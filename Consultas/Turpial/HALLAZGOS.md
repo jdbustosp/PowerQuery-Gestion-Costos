@@ -72,3 +72,5 @@ Regla de Juan: contratos y órdenes de compra toman el clasificador solo de los 
   refresco baja de unos 150 s a unos 65 s porque BD se calcula una vez.
 - Al unificar las consultas: estas columnas y filas llegarían a los otros libros, y sus dinámicas tendrían que excluir
   `FACTURA` igual que Turpial.
+- Las filas de apoyo ya no llevan un centro de costos inventado: usan el de su OC y, el teorico, el de su fila; asi BD solo tiene centros reales y varios conviven bien. Sin el valor `(FACTURA)` ya no hace falta ocultar nada en la dinamica por centro de costos.
+- Bajo filtro de provision, asegurado, entradas y comparativos viven en la fila `(sin factura)`: si se quita esa fila del filtro `Factura`, esas columnas quedan en 0 aunque el bruto siga.
