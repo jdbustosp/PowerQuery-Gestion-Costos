@@ -379,7 +379,7 @@ let
 
 
     // ===== 5. Insumo oficial (nombre del SEGUIMIENTO) y totales por fila =====
-    // El orden se fija antes de los cruces (no lo conservan): de el sale la cantidad del grupo
+    // El orden se fija antes de los cruces (no lo conservan): las filas salen en el orden del informe
     ContratosOrden = Table.AddIndexColumn(ContratosValidos, "__Orden", 0, 1),
     ConInsumo = Table.NestedJoin(ContratosOrden, {"Centro de Costos", "CodigoAct", "InsClave_Cruce"}, MaestroInsumosDist, {"Centro de Costos", "Codigo act", "InsClave_Cruce"}, "INS", JoinKind.LeftOuter),
     ExpInsumo = Table.ExpandTableColumn(ConInsumo, "INS", {"Ref.InsOficial"}, {"Ref.InsOficial"}),
@@ -417,8 +417,7 @@ let
         {"NombreC", each List.First(List.RemoveNulls([NombreC])), type nullable text},
         {"NitC", each List.First(List.RemoveNulls([NitC])), type nullable text},
         {"__Orden", each List.Min([__Orden]), type number}}),
-    // Table.Buffer: sin el, Table.Group ignora el orden y la cantidad del grupo cambia entre refrescos
-    AgrupadoOrden = Table.Buffer(Table.Sort(Agrupado, {{"__Orden", Order.Ascending}})),
+    AgrupadoOrden = Table.Sort(Agrupado, {{"__Orden", Order.Ascending}}),
 
     // % de anticipo = anticipos / contratado, hacia arriba a 2 decimales para que el anticipo quepa en el tope
     ContratadoPorContrato = Table.Group(Agrupado, {"Cod Contrato"}, {{"VT", each List.Sum([VT]), type number}}),
@@ -430,9 +429,10 @@ let
             c = Record.FieldOrDefault(MapaContratado, k, 0)
         in if a <= 0 or c <= 0 then 0 else List.Min({100, Number.RoundUp(Number.Round(10000 * a / c, 6)) / 100}),
 
-    // Cantidad del grupo = la del primer insumo con cantidad del contrato en esa actividad
+    // Cantidad del grupo = la menor cantidad positiva del contrato en esa actividad: no depende del orden de las filas
+    // (Table.Group no lo respeta) y la cantidad detalle queda >= 1, sin perder precision al redondearla a 4 decimales
     CantGrupo = Table.Group(AgrupadoOrden, {"Cod Contrato", "Grupo"}, {
-        {"CantGrupo", each List.First(List.Select([Cant], each _ <> null and _ <> 0)), type nullable number},
+        {"CantGrupo", each let c = List.Select([Cant], each _ <> null and _ <> 0), p = List.Select(c, each _ > 0) in if List.IsEmpty(p) then List.Max(c) else List.Min(p), type nullable number},
         {"UMG", each List.First(List.Select([UMGrupo], each _ <> null and _ <> "")), type nullable text}}),
     ConCantGrupo = Table.Sort(Table.ExpandTableColumn(
         Table.NestedJoin(AgrupadoOrden, {"Cod Contrato", "Grupo"}, CantGrupo, {"Cod Contrato", "Grupo"}, "__G", JoinKind.LeftOuter),
