@@ -732,7 +732,17 @@ let
         {"Desc prov", each List.Sum([Valor descuento]), type number}}),
     ParesOCProv = Table.Distinct(Table.SelectColumns(Table.SelectRows(ConSeg, each [Fila real] = null),
         {"OC", "No_Prov seg", "Tipo OC", "CC OC", "Contratista OC", "Clasificador OC"})),
-    FilasProvBase = Table.ExpandTableColumn(Table.NestedJoin(ParesOCProv, {"OC"}, ValoresOC, {"OC"}, "V", JoinKind.LeftOuter), "V", {"Aseg prov", "Comp prov", "Inv prov", "Desc prov"}),
+    FilasProvOC = Table.ExpandTableColumn(Table.NestedJoin(ParesOCProv, {"OC"}, ValoresOC, {"OC"}, "V", JoinKind.LeftOuter), "V", {"Aseg prov", "Comp prov", "Inv prov", "Desc prov"}),
+    // Cruce por factura: cada factura de la provision lleva sus entradas; el resto de la OC queda en (sin factura), asi cada provision suma el total de la OC.
+    ParesFactProv = Table.Distinct(Table.SelectColumns(Table.SelectRows(ConSeg, each [Fila real] = null and [Factura] <> "(sin factura)"),
+        {"OC", "Factura", "No_Prov seg", "Tipo OC", "CC OC", "Contratista OC", "Clasificador OC"})),
+    InvPorFactura = Table.Group(Table.SelectRows(ConSeg, each [Tipo] = "FACTURA" and [Factura] <> "(sin factura)"), {"OC", "Factura"}, {{"Inv prov", each List.Sum([Invertido factura]), type number}}),
+    FilasProvFact = Table.ExpandTableColumn(Table.NestedJoin(ParesFactProv, {"OC", "Factura"}, InvPorFactura, {"OC", "Factura"}, "V", JoinKind.Inner), "V", {"Inv prov"}),
+    RepartidoProv = Table.Group(FilasProvFact, {"OC", "No_Prov seg"}, {{"__Rep", each List.Sum([Inv prov]), type number}}),
+    FilasProvResto = Table.RemoveColumns(Table.ReplaceValue(
+        Table.ExpandTableColumn(Table.NestedJoin(FilasProvOC, {"OC", "No_Prov seg"}, RepartidoProv, {"OC", "No_Prov seg"}, "R", JoinKind.LeftOuter), "R", {"__Rep"}),
+        each [Inv prov], each (if [Inv prov] = null then 0 else [Inv prov]) - (if [__Rep] = null then 0 else [__Rep]), Replacer.ReplaceValue, {"Inv prov"}), {"__Rep"}),
+    FilasProvBase = Table.Combine({Table.AddColumn(FilasProvResto, "Factura", each "(sin factura)", type text), FilasProvFact}),
     // Teorico: se repite por contratista para que siga visible al filtrar uno.
     TeoClaves = Table.Group(Table.SelectRows(ConSeg, each [Tipo] = "TEORICO" and [Clasif desperdicio] <> "(no aplica)"),
         {"Centro de Costos", "Clasif desperdicio", "Ins", "Tipologia", "TipoElemento"}, {{"Teorico fijo", each List.Sum([Cant. teorica]), type number}}),
@@ -742,7 +752,7 @@ let
     FnApoyo = (tabla as table, valores as record) as table =>
         List.Accumulate(Record.FieldNames(valores), tabla, (st, c) => Table.AddColumn(st, c, each Record.Field(valores, c))),
     FilasProv = Table.AddColumn(FnApoyo(Table.AddColumn(FilasProvBase, "Centro de Costos", each FnCCOC([OC]), type text), [Tipo = "FACTURA", #"# CC - Comparativo" = "SIN CUADRO COMPARATIVO",
-        Factura = "(sin factura)", #"Clasif desperdicio" = "(no aplica)", #"Contratista almacen" = "(no aplica)"]), "# OC / Contrato", each [OC], type text),
+        #"Clasif desperdicio" = "(no aplica)", #"Contratista almacen" = "(no aplica)"]), "# OC / Contrato", each [OC], type text),
     FilasTeo = FnApoyo(FilasTeoBase, [Tipo = "FACTURA", #"# CC - Comparativo" = "SIN CUADRO COMPARATIVO", #"Tipo OC" = "(no aplica)", #"No_Prov seg" = "(otros registros)", #"Fila real" = 1]),
     ConApoyo = Table.Combine({ConSeg, FilasProv, FilasTeo}),
     FinalRecortada = Table.SelectColumns(ConApoyo, ColumnasFinalesArboleda & {"OC", "Tipo OC", "CC OC", "Contratista OC", "Clasificador OC", "Factura", "Invertido factura", "No_Prov seg", "Fila real", "Aseg prov", "Comp prov", "Inv prov", "Desc prov", "Teorico fijo", "Clasif desperdicio", "Contratista almacen", "VT Adicionales",
