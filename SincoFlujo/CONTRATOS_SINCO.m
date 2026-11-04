@@ -161,7 +161,7 @@ let
     FxProcesarCentroCosto = (BinarioSeguimiento as binary, BinarioPresupuesto as binary) as table =>
         let
             OrigenItems = try Excel.Workbook(BinarioSeguimiento, null, true){0}[Data]
-                          otherwise Html.Table(Text.FromBinary(BinarioSeguimiento, 1252), Columnas_HTML4, [RowSelector="tr"]),
+                          otherwise Html.Table(Text.FromBinary(BinarioSeguimiento, 65001), Columnas_HTML4, [RowSelector="tr"]),
             ItemsPrepared = Table.Buffer(FnPrepareTableWithHeader(OrigenItems)),
 
             ItemsColNames = Table.ColumnNames(ItemsPrepared),
@@ -214,7 +214,7 @@ let
                 in baseTxt, type text),
 
             OrigenAPU_Raw = try Excel.Workbook(BinarioPresupuesto, null, true){0}[Data]
-                            otherwise Html.Table(Text.FromBinary(BinarioPresupuesto, 1252), Columnas_APU, [RowSelector="tr"]),
+                            otherwise Html.Table(Text.FromBinary(BinarioPresupuesto, 65001), Columnas_APU, [RowSelector="tr"]),
             OrigenAPU_Cols = Table.SelectColumns(OrigenAPU_Raw, List.FirstN(Table.ColumnNames(OrigenAPU_Raw), 3)),
             OrigenAPU = Table.RenameColumns(OrigenAPU_Cols, List.Zip({Table.ColumnNames(OrigenAPU_Cols), {"Columna 1", "Columna 2", "Columna 3"}})),
 
@@ -387,16 +387,18 @@ let
 
     Filas = Table.FromRecords(Table.TransformRows(ConIndice, (r) =>
         let
-            insTxt = if r[Ref.InsOficial] <> null then r[Ref.InsOficial]
-                     else if r[Columna2] = null or Text.Trim(Text.From(r[Columna2])) = "" then "SIN DESCRIPCION"
-                     else Text.Trim(Text.From(r[Columna2])),
+            // El nombre del contrato manda: la clave de cruce ignora el parentesis y "X (DIA)" y "X (MES)" comparten clave
+            insCto = if r[Columna2] = null then "" else Text.Trim(Text.Replace(Text.Replace(Text.From(r[Columna2]), "#(00A0)", " "), "160;", "")),
+            insTxt = if insCto <> "" then insCto
+                     else if r[Ref.InsOficial] <> null then r[Ref.InsOficial]
+                     else "SIN DESCRIPCION",
             sepAct = FnSepararUM(r[Ref.Act])
         in [
             #"Cod Contrato" = r[Cod Contrato],
             Descripcion = FnQuitarTildes(Text.Combine(List.Transform(List.Select({r[Descripcion contrato], r[Nombre Contratista], r[Cod Contrato]}, each _ <> null and Text.Trim(Text.From(_)) <> ""), Text.From), " / ")),
             Grupo = r[CodigoAct],
             UMGrupo = FnQuitarTildes(sepAct[UM]),
-            Insumo = FnQuitarTildes(FnSepararUM(insTxt)[Nombre]),
+            Insumo = FnQuitarTildes(insTxt),
             Cant = if r[Cantidad Contratado] = null then 0 else r[Cantidad Contratado],
             VT = r[VT Contratado],
             NombreC = if FnTxtCelda(r[Nombre Contratista]) = "" then null else FnTxtCelda(r[Nombre Contratista]),

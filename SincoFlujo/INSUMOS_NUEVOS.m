@@ -77,7 +77,7 @@ let
     ParesSeg = Table.Distinct(
         Table.FromRecords(Table.TransformRows(InsumosSeg, (r) => [
             ActCod = r[ActCod], ActDesc = r[ActDesc],
-            InsCod = Limpiar(r[Columna1]), InsDesc = Limpiar(r[Columna2]),
+            InsCod = Limpiar(r[Columna1]), InsDesc = Text.Trim(Text.Replace(Limpiar(r[Columna2]), "160;", "")),
             Tipo = Limpiar(r[Columna3]), UM = Limpiar(r[Columna4]),
             ProyCant = FxNum(r[Columna8]), ProyVrU = FxNum(r[Columna9])
         ]), type table [ActCod = text, ActDesc = text, InsCod = text, InsDesc = text, Tipo = text, UM = text, ProyCant = nullable number, ProyVrU = nullable number]),
