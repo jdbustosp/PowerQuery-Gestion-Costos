@@ -417,7 +417,8 @@ let
         {"NombreC", each List.First(List.RemoveNulls([NombreC])), type nullable text},
         {"NitC", each List.First(List.RemoveNulls([NitC])), type nullable text},
         {"__Orden", each List.Min([__Orden]), type number}}),
-    AgrupadoOrden = Table.Sort(Agrupado, {{"__Orden", Order.Ascending}}),
+    // Table.Buffer: sin el, Table.Group ignora el orden y la cantidad del grupo cambia entre refrescos
+    AgrupadoOrden = Table.Buffer(Table.Sort(Agrupado, {{"__Orden", Order.Ascending}})),
 
     // % de anticipo = anticipos / contratado, hacia arriba a 2 decimales para que el anticipo quepa en el tope
     ContratadoPorContrato = Table.Group(Agrupado, {"Cod Contrato"}, {{"VT", each List.Sum([VT]), type number}}),
