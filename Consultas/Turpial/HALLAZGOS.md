@@ -90,3 +90,5 @@ Regla de Juan: contratos y órdenes de compra toman el clasificador solo de los 
 - Por COM en configuracion regional espanola, `PivotField.NumberFormat` tambien va en notacion local, y `ColumnWidth` exige `[double]` explicito.
 - Duplicar una hoja con dinamicas y segmentadores (`Worksheet.Copy`) crea segmentadores nuevos atados a las dinamicas copiadas: la copia filtra sola y conserva formatos, plegado y filtros. Mover una dinamica completa con `Cut` de columnas funciona; los GETPIVOTDATA la siguen.
 - Agrupadores contiguos del mismo nivel se funden en uno: para agrupar columnas por edificacion, la primera columna de cada bloque queda fuera del grupo. Sirve de separador y queda visible al plegar.
+- Memorias de concreto: el insumo se elige en lista en cada fila y el teorico lo toma de esa celda, no de resistencia + familia. Asi cada elemento cruza con las salidas del insumo real. Un numero pegado de una memoria vieja sale marcado como sin insumo.
+- Titulos sobre una tabla: centrar en la seleccion centra sin combinar celdas, asi que copiar el bloque y leer el titulo en su primera columna siguen funcionando.
