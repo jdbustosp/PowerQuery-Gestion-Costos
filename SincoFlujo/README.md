@@ -22,3 +22,11 @@ y conservan entre refrescos lo que escribe el flujo (`FxConservarEstado`).
 | ORDENES_COMPRA | ORDENES COMPRA | INFORMEORDEN + ESTADO DE ORDENES |
 | ASIGNACION_OC | ASIGNACION | INFORMEORDEN + ESTADO DE ORDENES |
 | ENTRADAS (tabla ENTRADAS_SINCO) | ENTRADAS | Informe masivo de entradas + Facturacion de entradas y actas |
+
+## Limitación conocida (2026-11-05): códigos de actividad repetidos
+
+Si el informe trae el mismo código de actividad en dos subcapítulos, `PLANTILLA_PPTO_SINCO` agrupa los insumos por
+código (`Padre`): cada ocurrencia recibe el valor unitario de todas y la plantilla queda por encima del total de
+SEGUIMIENTO. El mapa de subcapítulo y la lista de actividades en cero también van por código. Control: comparar la
+suma de `Vr Total` con el TOTAL PROYECTO de SEGUIMIENTO antes de cargar. Sin corregir: falta confirmar cómo trata el
+importador de SINCO los códigos repetidos, porque de eso depende el arreglo.
