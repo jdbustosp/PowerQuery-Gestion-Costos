@@ -21,7 +21,7 @@ let
         List.RemoveNulls(
             List.Transform(
                 try TablaComparativo[#"# OC / Contrato"] otherwise {},
-                each let oc = ToTextClean(_) in if oc = "" then null else oc
+                each let oc = Text.Upper(ToTextClean(_)) in if oc = "" then null else oc
             )
         )
     ),
@@ -37,12 +37,10 @@ let
     ),
 
     FiltradoPorOC = Table.SelectRows(BaseConValor, each
-        let ocText = ToTextClean(GetField(_, "# OC / Contrato", ""))
+        let ocText = Text.Upper(ToTextClean(GetField(_, "# OC / Contrato", "")))
         in ocText = "" or not Record.HasFields(SetOC, {ocText})
     ),
-
-    // Si COMPARATIVOS excluye todo, se conserva BaseConValor para evitar SINCO en 0 filas.
-    BaseSINCO = if Table.RowCount(FiltradoPorOC) > 0 then FiltradoPorOC else BaseConValor,
+    BaseSINCO = FiltradoPorOC,
 
     LimpiezaTextos = Table.TransformColumns(BaseSINCO, {
         {"Nombre Contratista", each FnRemoveAccentsSymbols(if _ = null then null else Text.Trim(Text.From(_))), type text},
