@@ -334,6 +334,14 @@ let
         not ([Tipo] = "Insumo" and List.Contains(CodigosListaNegra, [Padre] ?? ""))
     ),
 
-    SinHuerfanos = Table.SelectRows(TablaLimpia, each [Padre] <> null or [Código] = "CD")
+    SinHuerfanos0 = Table.SelectRows(TablaLimpia, each [Padre] <> null or [Código] = "CD"),
+
+    // Capitulos sin actividades (p. ej. todas en cantidad 0): SINCO rechaza el archivo si dos capitulos
+    // comparten codigo ("actividades con mas de un padre"); un capitulo vacio se quita.
+    TiposOrden = List.Buffer(Table.Column(SinHuerfanos0, "Tipo")),
+    ConPos = Table.AddIndexColumn(SinHuerfanos0, "_pos", 0, 1, Int64.Type),
+    SinCapVacios = Table.SelectRows(ConPos, each [Tipo] <> "Capítulo" or
+        (if [_pos] + 1 < List.Count(TiposOrden) then TiposOrden{[_pos] + 1} = "Actividad" else false)),
+    SinHuerfanos = Table.RemoveColumns(SinCapVacios, {"_pos"})
 in
     if OrigenActual = "ORACLE" then PlantillaOracle() else SinHuerfanos
