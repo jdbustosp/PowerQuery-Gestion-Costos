@@ -16,7 +16,7 @@ let
            else [Tipologia = Txt(f{0}[Estructura]), NumUnidades = Num(f{0}[No Unidades]), CC = Txt(f{0}[Centro de Costos])],
     SinIns = (x as text) as text => "SIN INSUMO EN CATALOGO - " & x,
     InsCat = (fam as text, tipo as text, par as text) as text =>
-        let f = List.Select(Cat, each Txt([Familia]) = fam and Txt([Categoria]) = (if fam = "Concreto" then "Insumo" else "Referencia")
+        let f = List.Select(Cat, each Txt([Familia]) = fam and Txt([Categoria]) = "Referencia"
                 and Text.StartsWith(Norm([Tipo]), Norm(tipo)) and Norm([Parametro]) = Norm(par))
         in if List.IsEmpty(f) then "" else Txt(f{0}[Ins]),
 
@@ -43,9 +43,8 @@ let
             FilaC = (f as list) as list =>
                 let fam = Txt(f{i}), fc = Txt(f{i + 3}), q = Num(f{cCant})
                 in if q = 0 or fc = "" then {}
-                   else let ins = InsCat("Concreto", fc, fam)
-                        in {base & [Material = "CONCRETO", TipoElemento = fam, Piso = Txt(f{i + 1}),
-                                    Ins = if ins = "" then SinIns(fam & " " & fc) else ins, CantUnidad = q]},
+                   else {base & [Material = "CONCRETO", TipoElemento = fam, Piso = Txt(f{i + 1}),
+                                 Ins = if f{i + 3} is number then SinIns(fam & " " & fc) else fc, CantUnidad = q]},
             FilaA = (f as list) as list =>
                 let v = f{cCant}
                 in if not (v is number) or v = 0 then {}
