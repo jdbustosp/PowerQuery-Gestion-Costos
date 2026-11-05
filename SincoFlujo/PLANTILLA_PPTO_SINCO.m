@@ -87,6 +87,14 @@ let
     SoloActSeg = Table.SelectRows(FillSubCap, each [ClaseSeg] = "Actividad"),
     ConCodActSeg = Table.AddColumn(SoloActSeg, "CodActSeg", each FxLimpiarCelda([Columna1]), type text),
     MapaSubcapActividad = Table.Buffer(Table.Distinct(Table.SelectColumns(ConCodActSeg, {"CodActSeg", "SubCapRaw"}), {"CodActSeg"})),
+    // Codigos de actividad repetidos en subcapitulos distintos: el
+    // subcapitulo se cruza por OCURRENCIA = codigo + descripcion normalizada + orden.
+    FxNormDesc = (t as nullable text) as text =>
+        Text.Upper(Text.Remove(FxLimpiarCelda(t), {" ", "-", ".", ",", "(", ")", "/", "_", ":", ";", "#(00A0)"})),
+    SegConDesc = Table.AddColumn(ConCodActSeg, "DescSegN", each FxNormDesc([Columna2]), type text),
+    SegOrd = Table.Combine(Table.Group(Table.AddIndexColumn(SegConDesc, "_pos", 0, 1, Int64.Type), {"CodActSeg", "DescSegN"},
+        {{"t", each Table.AddIndexColumn(Table.Sort(_, {{"_pos", Order.Ascending}}), "OrdSeg", 1, 1, Int64.Type)}})[t]),
+    MapaSubcapOcurrencia = Table.Buffer(Table.SelectColumns(SegOrd, {"CodActSeg", "DescSegN", "OrdSeg", "SubCapRaw"})),
 
     // =========================================================
     // 3. EXTRACCIÓN DE LA BASE PRINCIPAL: "ANALISIS DE PRECIOS"
@@ -179,8 +187,16 @@ let
         each Text.Trim(_)
     )))),
 
-    JoinSubcap = Table.NestedJoin(SoloValidos, {"Código"}, MapaSubcapActividad, {"CodActSeg"}, "SubcapGroup", JoinKind.LeftOuter),
-    ExpandSubcap = Table.ExpandTableColumn(JoinSubcap, "SubcapGroup", {"SubCapRaw"}, {"SubCapRaw"}),
+    ActsApu = Table.AddColumn(Table.SelectRows(SoloValidos, each [Tipo] = "Actividad"), "DescN", each FxNormDesc([Descripción]), type text),
+    ActsApuOrd = Table.Buffer(Table.SelectColumns(Table.Combine(Table.Group(ActsApu, {"Código", "DescN"},
+        {{"t", each Table.AddIndexColumn(Table.Sort(_, {{"IndiceFila", Order.Ascending}}), "OrdAct", 1, 1, Int64.Type)}})[t]), {"IndiceFila", "Código", "DescN", "OrdAct"})),
+    ActsConSubOcc = Table.ExpandTableColumn(Table.NestedJoin(ActsApuOrd, {"Código", "DescN", "OrdAct"}, MapaSubcapOcurrencia, {"CodActSeg", "DescSegN", "OrdSeg"}, "g", JoinKind.LeftOuter), "g", {"SubCapRaw"}, {"SubCapOcc"}),
+    MapaSubOccFila = Table.Buffer(Table.SelectColumns(ActsConSubOcc, {"IndiceFila", "SubCapOcc"})),
+    JoinSubcap0 = Table.NestedJoin(SoloValidos, {"Código"}, MapaSubcapActividad, {"CodActSeg"}, "SubcapGroup", JoinKind.LeftOuter),
+    ExpandSubcap0 = Table.ExpandTableColumn(JoinSubcap0, "SubcapGroup", {"SubCapRaw"}, {"SubCapRawCod"}),
+    JoinSubOcc = Table.ExpandTableColumn(Table.NestedJoin(ExpandSubcap0, {"IndiceFila"}, MapaSubOccFila, {"IndiceFila"}, "o", JoinKind.LeftOuter), "o", {"SubCapOcc"}, {"SubCapOcc"}),
+    ExpandSubcap = Table.RemoveColumns(Table.AddColumn(JoinSubOcc, "SubCapRaw", each
+        if [SubCapOcc] <> null and Text.Trim([SubCapOcc]) <> "" then [SubCapOcc] else [SubCapRawCod], type text), {"SubCapOcc", "SubCapRawCod"}),
 
     ExtraccionSubcap = Table.AddColumn(ExpandSubcap, "DatosSubcap", each
         [
@@ -218,7 +234,8 @@ let
     // =========================================================
     AddPadreCap = Table.AddColumn(OrdenadoParaPadres, "MemoriaCapitulo", each if [Tipo] = "Capítulo" then [Código] else null),
     AddPadreAct = Table.AddColumn(AddPadreCap, "MemoriaActividad", each if [Tipo] = "Actividad" then [Código] else null),
-    RellenarHaciaAbajo = Table.FillDown(AddPadreAct, {"MemoriaCapitulo", "MemoriaActividad"}),
+    AddActIdx = Table.AddColumn(AddPadreAct, "MemoriaActIdx", each if [Tipo] = "Actividad" then [IndiceFila] else null, Int64.Type),
+    RellenarHaciaAbajo = Table.FillDown(AddActIdx, {"MemoriaCapitulo", "MemoriaActividad", "MemoriaActIdx"}),
 
     CalcularPadre = Table.AddColumn(RellenarHaciaAbajo, "Padre", each
         if [Tipo] = "Capítulo" then "CD"
@@ -234,14 +251,18 @@ let
     // 7. MATEMÁTICA
     // =========================================================
     TablaInsumos = Table.SelectRows(BaseEnMemoria, each [Tipo] = "Insumo"),
-    SumaPorActividad = Table.Group(TablaInsumos, {"Padre"}, {{"SumaVrUnitario", each List.Sum([VrUnitario_Temp]), type nullable number}}),
+    SumaPorActividad = Table.Group(TablaInsumos, {"MemoriaActIdx"}, {{"SumaVrUnitario", each List.Sum([VrUnitario_Temp]), type nullable number}}),
 
-    JoinSuma = Table.NestedJoin(BaseEnMemoria, {"Código"}, SumaPorActividad, {"Padre"}, "SumaGroup", JoinKind.LeftOuter),
+    JoinSuma = Table.NestedJoin(BaseEnMemoria, {"IndiceFila"}, SumaPorActividad, {"MemoriaActIdx"}, "SumaGroup", JoinKind.LeftOuter),
     ExpandSuma = Table.ExpandTableColumn(JoinSuma, "SumaGroup", {"SumaVrUnitario"}, {"SumaVrUnitario"}),
 
     CalculoVrUnitario = Table.AddColumn(ExpandSuma, "Vr Unitario", each if [Tipo] = "Actividad" then [SumaVrUnitario] else [VrUnitario_Temp]),
     CalculoVrTotal = Table.AddColumn(CalculoVrUnitario, "Vr Total", each if [Tipo] = "Actividad" and [Cantidad] <> null and [Vr Unitario] <> null then [Cantidad] * [Vr Unitario] else null),
-    Reordenado = Table.Sort(CalculoVrTotal, {{"IndiceFila", Order.Ascending}}),
+    ReordenadoTodo = Table.Sort(CalculoVrTotal, {{"IndiceFila", Order.Ascending}}),
+    FilasActEnCero = List.Buffer(Table.SelectRows(ReordenadoTodo, each [Tipo] = "Actividad" and [Cantidad] = 0)[IndiceFila]),
+    Reordenado = Table.SelectRows(ReordenadoTodo, each
+        not ([Tipo] = "Actividad" and List.Contains(FilasActEnCero, [IndiceFila])) and
+        not ([Tipo] = "Insumo" and List.Contains(FilasActEnCero, [MemoriaActIdx]))),
 
     // =========================================================
     // 8. CRUCE CON SEGUIMIENTO

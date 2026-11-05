@@ -25,9 +25,9 @@ y conservan entre refrescos lo que escribe el flujo (`FxConservarEstado`).
 
 ## Limitación conocida (2026-11-05): códigos de actividad repetidos
 
-Si el informe trae el mismo código de actividad en dos subcapítulos, `PLANTILLA_PPTO_SINCO` agrupa los insumos por
-código (`Padre`): cada ocurrencia recibe el valor unitario de todas y la plantilla queda por encima del total de
-SEGUIMIENTO. El mapa de subcapítulo y la lista de actividades en cero también van por código. Control: comparar la
-suma de `Vr Total` con el TOTAL PROYECTO de SEGUIMIENTO antes de cargar. Confirmado en un proyecto cargado: el importador enlaza
-los insumos por código, no por orden de fila. Crea todas las actividades, pero deja los insumos de todas las ocurrencias
-en una sola y las demás en cero. Agrupar por ocurrencia en el M no basta: cada ocurrencia necesita código único. Sin corregir.
+Códigos de actividad repetidos en dos subcapítulos (2026-11-05): `PLANTILLA_PPTO_SINCO` trabaja por OCURRENCIA. El
+subcapítulo se cruza por código + descripción normalizada + orden; la suma de insumos y la exclusión de actividades
+en cero van por la fila de la actividad (antes iban por código: valores inflados, subcapítulo de la primera y
+ocurrencias borradas). Sin códigos repetidos el resultado es idéntico al anterior. Control: la suma de `Vr Total`
+debe igualar el TOTAL PROYECTO de SEGUIMIENTO. Pendiente fuera del M: el importador de SINCO enlaza los insumos por
+código y deja los de todas las ocurrencias en la primera; revisar el APU en SINCO antes de poner en ejecución.
