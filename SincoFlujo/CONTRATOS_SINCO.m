@@ -224,8 +224,12 @@ let
                     c1 = Text.Trim(Text.From(c1Value)),
                     hasDash = Text.Contains(c1, "-"),
                     preDash = if hasDash then Text.Trim(Text.BeforeDelimiter(c1, "-")) else "",
+                    // Igual que F_Globales: solo es actividad si el codigo YA trae punto ("4.001").
+                    // Las filas de insumo ("4001 - Obras Provisionales") pasaban a "4.001" y, si iban
+                    // antes que la actividad, le daban su cantidad como UM ("1.00000") y su nombre.
+                    tienePunto = Text.Contains(preDash, "."),
                     esNum = try Number.FromText(preDash) otherwise null
-                in if hasDash and esNum <> null then FnFormatCodigoAct(preDash) else null),
+                in if hasDash and esNum <> null and tienePunto then FnFormatCodigoAct(preDash) else null),
             APU_Paso2 = Table.SelectRows(APU_Paso1, each [Cod_Temp] <> null),
             APU_Diccionario = Table.AddColumn(APU_Paso2, "NombreActAPU", each
                 let
