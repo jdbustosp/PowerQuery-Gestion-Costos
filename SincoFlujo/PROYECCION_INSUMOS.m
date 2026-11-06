@@ -10,7 +10,8 @@
 // Contratado mayor que lo proyectado (tabla CONTRATOS_SINCO del libro, cantidad =
 // Cantidad grupo x Cantidad detalle): la cantidad sube a la contratada (redondeada
 // hacia arriba a 2 decimales) y el valor unitario baja para conservar el valor total
-// proyectado; SINCO no deja contratar mas cantidad que la proyectada.
+// proyectado; SINCO no deja contratar mas cantidad que la proyectada. Si el valor
+// contratado supera el proyectado hasta en 1 peso (redondeo), el total sube al contratado.
 let
     SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
     Headers = [Accept="application/json;odata=nometadata"],
@@ -103,17 +104,26 @@ let
                     ProyVrU = FxNum(r[Columna9])
                 ])),
                 ConK = Table.AddColumn(Datos, "K", each [ACTIVIDAD] & "|" & NormTxt([INSUMO]), type text),
-                ConC = Table.ExpandTableColumn(Table.NestedJoin(ConK, {"K"}, Contratado, {"K"}, "__C", JoinKind.LeftOuter), "__C", {"CantC"}, {"CantC"}),
+                ConC = Table.ExpandTableColumn(Table.NestedJoin(ConK, {"K"}, Contratado, {"K"}, "__C", JoinKind.LeftOuter), "__C", {"CantC", "ValC"}, {"CantC", "ValC"}),
                 ConNueva = Table.AddColumn(ConC, "NuevaCant", each
                     let c = if [CantC] = null then 0 else Number.RoundUp(Number.Round([CantC] * 100, 6)) / 100
                     in if c > [ProyCant] + 0.000001 then c else [ProyCant], type number),
-                Difieren = Table.SelectRows(ConNueva, each Number.Abs([ProyCant] - [PresCant]) > 0.001 or Number.Abs([ProyVrU] - [PresVrU]) > 0.001
-                    or [NuevaCant] <> [ProyCant]),
+                // Valor contratado mayor que el proyectado por redondeo (hasta 1 peso): el total sube al contratado
+                // (centavos hacia arriba). Diferencias mayores no se tocan: SINCO las rechaza y quedan como error.
+                ConTotal = Table.AddColumn(ConNueva, "NuevoTotal", each
+                    let t = [ProyCant] * [ProyVrU], v = if [ValC] = null then 0 else Number.RoundUp(Number.Round([ValC] * 100, 6)) / 100
+                    in if v > t + 0.005 and v - t <= 1 then v else t, type number),
+                Difieren = Table.SelectRows(ConTotal, each Number.Abs([ProyCant] - [PresCant]) > 0.001 or Number.Abs([ProyVrU] - [PresVrU]) > 0.001
+                    or [NuevaCant] <> [ProyCant] or [NuevoTotal] <> [ProyCant] * [ProyVrU]),
                 Salida = Table.FromRecords(Table.TransformRows(Difieren, (r) => [
                     ACTIVIDAD = r[ACTIVIDAD],
                     INSUMO = r[INSUMO],
                     #"CANTIDAD PROYECTADA" = Number.Round(r[NuevaCant], 6),
-                    #"VALOR UNITARIO" = Number.Round(if r[NuevaCant] = r[ProyCant] then r[ProyVrU] else r[ProyCant] * r[ProyVrU] / r[NuevaCant], 6)
+                    #"VALOR UNITARIO" =
+                        if r[NuevaCant] = 0 then r[ProyVrU]
+                        else if r[NuevoTotal] <> r[ProyCant] * r[ProyVrU] then Number.RoundUp(Number.Round(r[NuevoTotal] / r[NuevaCant] * 1000000, 3)) / 1000000
+                        else if r[NuevaCant] = r[ProyCant] then Number.Round(r[ProyVrU], 6)
+                        else Number.Round(r[ProyCant] * r[ProyVrU] / r[NuevaCant], 6)
                 ])),
                 Dedup = Table.Distinct(Salida, {"ACTIVIDAD","INSUMO"})
             in
