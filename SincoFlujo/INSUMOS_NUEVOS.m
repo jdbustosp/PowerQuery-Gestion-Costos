@@ -8,7 +8,9 @@
 //   H ESTADO ASOCIACION  I ES NUEVO (SI/NO)  J VR UNITARIO (proyectado)
 //   K CANT APU = cantidad proyectada del insumo / cantidad de la actividad en
 //     el APU (si la actividad no trae cantidad, la cantidad proyectada)
-// G y H los escribe el flujo y se conservan (clave COD ACTIVIDAD|INSUMO).
+// G y H los escribe el flujo y se conservan (clave COD ACTIVIDAD|INSUMO); el
+// OK de creacion se copia a las demas filas del mismo insumo, y las filas cuyo
+// par ya esta en el APU salen (paso 4).
 // Los codigos de insumo son del SINCO de la constructora: solo se usan para
 // comparar sus dos reportes.
 let
@@ -138,7 +140,32 @@ let
         then #table({"ACTIVIDAD","INSUMO","TIPO","UM","GRUPO","COD ACTIVIDAD","ES NUEVO (SI/NO)","VR UNITARIO","CANT APU"}, {})
         else Nuevo,
 
-    Salida = FxConservarEstado(NuevoTabla, "INSUMOS_NUEVOS", {"COD ACTIVIDAD", "INSUMO"}, {"ESTADO CREACION", "ESTADO ASOCIACION"},
-        {"ACTIVIDAD","INSUMO","TIPO","UM","GRUPO","COD ACTIVIDAD","ESTADO CREACION","ESTADO ASOCIACION","ES NUEVO (SI/NO)","VR UNITARIO","CANT APU"})
+    // ===== 4. Estados =====
+    // Un par que ya aparece en el APU quedo asociado en SINCO: su fila sale de la
+    // hoja (no se conservan huerfanas). Si falta alguno de los dos informes no se
+    // puede saber, y se conservan todas para no perder lo hecho.
+    ColsSalida = {"ACTIVIDAD","INSUMO","TIPO","UM","GRUPO","COD ACTIVIDAD","ESTADO CREACION","ESTADO ASOCIACION","ES NUEVO (SI/NO)","VR UNITARIO","CANT APU"},
+    InformesCompletos = BinSeg <> null and BinApu <> null,
+    Conservado = FxConservarEstado(NuevoTabla, "INSUMOS_NUEVOS", {"COD ACTIVIDAD", "INSUMO"}, {"ESTADO CREACION", "ESTADO ASOCIACION"},
+        ColsSalida, not InformesCompletos),
+
+    // El insumo se crea una vez en el maestro: si una fila ya dice "OK - ...", las
+    // demas filas nuevas del mismo insumo toman ese mismo texto (lleva el codigo
+    // SINCO "YA CREADO nnn" / "YA EXISTE nnn" que usa la asociacion).
+    TxtK = (v as any) as text => if v = null then "" else Text.Upper(Text.Trim(Text.From(v))),
+    EsOK = (v as any) as logical => Text.Contains(TxtK(v), "OK - "),
+    ConOK = Table.SelectRows(Conservado, each EsOK([ESTADO CREACION])),
+    Candidatos = Table.AddColumn(Table.AddColumn(ConOK, "__I", each TxtK([INSUMO]), type text), "__P", each
+        (if Text.Contains(TxtK([ESTADO CREACION]), "PRODUCTIVO") then 0 else 2)
+        + (if Text.Contains(TxtK([ESTADO CREACION]), "YA ") then 0 else 1), Int64.Type),
+    Mejor = Table.Distinct(Table.Buffer(Table.Sort(Candidatos, {{"__I", Order.Ascending}, {"__P", Order.Ascending}})), {"__I"}),
+    OkPorInsumo = Record.FromList(Mejor[ESTADO CREACION], Mejor[__I]),
+    ConCopia = Table.AddColumn(Conservado, "__E", (r) =>
+        let k = TxtK(r[INSUMO]) in
+        if r[#"ES NUEVO (SI/NO)"] = "SI" and not EsOK(r[ESTADO CREACION]) and Record.HasFields(OkPorInsumo, k)
+        then Record.Field(OkPorInsumo, k) else r[ESTADO CREACION]),
+    Salida = Table.SelectColumns(
+        Table.RenameColumns(Table.RemoveColumns(ConCopia, {"ESTADO CREACION"}), {{"__E", "ESTADO CREACION"}}),
+        ColsSalida)
 in
     Salida
