@@ -30,4 +30,8 @@ subcapítulo se cruza por código + descripción normalizada + orden; la suma de
 en cero van por la fila de la actividad (antes iban por código: valores inflados, subcapítulo de la primera y
 ocurrencias borradas). Sin códigos repetidos el resultado es idéntico al anterior. Control: la suma de `Vr Total`
 debe igualar el TOTAL PROYECTO de SEGUIMIENTO. Pendiente fuera del M: el importador de SINCO enlaza los insumos por
-código y deja los de todas las ocurrencias en la primera; revisar el APU en SINCO antes de poner en ejecución.
+código y deja los de todas las ocurrencias en una sola. Por eso (paso 5b) la primera ocurrencia con cantidad
+conserva su código y las siguientes reciben `<capítulo>.901`, `.902`… (orden del APU, saltando códigos usados);
+sus insumos heredan el código nuevo. Paso 7b: actividades con igual descripción y distinto valor reciben
+` (<código>)` al final, porque SINCO parece compartir el APU por descripción. Sin repetidos, sin cambios.
+Pendiente: las consultas de proyección, contratos, asignación y salidas siguen usando el código de origen.

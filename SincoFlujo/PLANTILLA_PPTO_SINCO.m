@@ -232,7 +232,37 @@ let
     // =========================================================
     // 6. LÓGICA DE PADRES Y JERARQUÍA
     // =========================================================
-    AddPadreCap = Table.AddColumn(OrdenadoParaPadres, "MemoriaCapitulo", each if [Tipo] = "Capítulo" then [Código] else null),
+    // =========================================================
+    // 5b. CODIGOS DE ACTIVIDAD UNICOS
+    // El importador de SINCO enlaza los insumos con su actividad por el CODIGO del Padre: si un codigo
+    // de actividad se repite en el APU, junta los insumos de todas las ocurrencias en una sola y deja las
+    // demas en 0 (volver a importar no lo arregla). Regla fija, sin tablas auxiliares: la primera
+    // ocurrencia (orden del APU, sin contar las de cantidad 0, que se quitan en 7) conserva su codigo y
+    // las siguientes reciben <capitulo>.901, .902... (en orden del APU, saltando codigos ya usados).
+    // Va despues del subcapitulo por ocurrencia (5, que usa el codigo original) y antes de los padres (6),
+    // para que los insumos hereden el codigo nuevo.
+    // =========================================================
+    ActsVivas = Table.Buffer(Table.SelectColumns(Table.SelectRows(OrdenadoParaPadres, each [Tipo] = "Actividad" and [Cantidad] <> 0), {"IndiceFila", "Código"})),
+    CodigosUsados = List.Buffer(List.Distinct(List.RemoveNulls(Table.SelectRows(OrdenadoParaPadres, each [Tipo] = "Actividad")[Código]))),
+    ActsOcc = if Table.IsEmpty(ActsVivas) then Table.AddColumn(ActsVivas, "Occ", each 1, Int64.Type) else
+        Table.Combine(Table.Group(ActsVivas, {"Código"}, {{"t", each Table.AddIndexColumn(Table.Sort(_, {{"IndiceFila", Order.Ascending}}), "Occ", 1, 1, Int64.Type)}})[t]),
+    ActsDup = Table.AddColumn(Table.SelectRows(ActsOcc, each [Occ] > 1), "Prefijo", each Text.BeforeDelimiter([Código], "."), type text),
+    MapaCodigoNuevo = if Table.IsEmpty(ActsDup) then #table(type table [IndiceFila = Int64.Type, CodigoNuevo = text], {}) else
+        Table.Buffer(Table.SelectColumns(Table.Combine(Table.Group(ActsDup, {"Prefijo"}, {{"t", (g) =>
+            let
+                pre = g{0}[Prefijo],
+                libres = List.Buffer(List.Select(List.Transform({901..999}, each pre & "." & Text.From(_)), each not List.Contains(CodigosUsados, _))),
+                ord = Table.AddIndexColumn(Table.Sort(g, {{"IndiceFila", Order.Ascending}}), "k", 0, 1, Int64.Type)
+            in
+                Table.AddColumn(ord, "CodigoNuevo", each if [k] < List.Count(libres) then libres{[k]}
+                    else error "PLANTILLA_PPTO_SINCO: mas de 99 codigos de actividad repetidos en el capitulo " & pre, type text)}})[t]),
+            {"IndiceFila", "CodigoNuevo"})),
+    ConCodNuevo = Table.ExpandTableColumn(Table.NestedJoin(OrdenadoParaPadres, {"IndiceFila"}, MapaCodigoNuevo, {"IndiceFila"}, "n", JoinKind.LeftOuter), "n", {"CodigoNuevo"}),
+    ConCodigoUnico = Table.Sort(Table.RenameColumns(Table.RemoveColumns(
+        Table.AddColumn(ConCodNuevo, "CodU", each if [CodigoNuevo] <> null then [CodigoNuevo] else [Código]),
+        {"Código", "CodigoNuevo"}), {{"CodU", "Código"}}), {{"IndiceFila", Order.Ascending}}),
+
+    AddPadreCap = Table.AddColumn(ConCodigoUnico, "MemoriaCapitulo", each if [Tipo] = "Capítulo" then [Código] else null),
     AddPadreAct = Table.AddColumn(AddPadreCap, "MemoriaActividad", each if [Tipo] = "Actividad" then [Código] else null),
     AddActIdx = Table.AddColumn(AddPadreAct, "MemoriaActIdx", each if [Tipo] = "Actividad" then [IndiceFila] else null, Int64.Type),
     RellenarHaciaAbajo = Table.FillDown(AddActIdx, {"MemoriaCapitulo", "MemoriaActividad", "MemoriaActIdx"}),
@@ -267,7 +297,20 @@ let
     // =========================================================
     // 8. CRUCE CON SEGUIMIENTO
     // =========================================================
-    ReordenadoLlave = Table.AddColumn(Reordenado, "LlaveInsumo", each if [Tipo] = "Insumo" then Text.Trim(Text.BeforeDelimiter([DescFinal], "-")) else null),
+    // 7b. SINCO tambien parece compartir el APU entre actividades con la MISMA descripcion: si dos
+    // actividades se llaman igual (normalizado) y valen distinto, a las siguientes se les agrega
+    // " (<codigo>)" para que no se mezclen. Si valen igual no se toca.
+    ActsDesc = Table.Buffer(Table.AddColumn(Table.SelectRows(Reordenado, each [Tipo] = "Actividad"), "DescN", each FxNormDesc([DescFinal]), type text)),
+    PrimerValorDesc = Table.Buffer(Table.Group(ActsDesc, {"DescN"},
+        {{"VrPrimero", each Number.Round(Table.Min(_, "IndiceFila")[Vr Unitario] ?? 0, 2), type number}})),
+    FilasDescDistinta = List.Buffer(Table.SelectRows(
+        Table.ExpandTableColumn(Table.NestedJoin(ActsDesc, {"DescN"}, PrimerValorDesc, {"DescN"}, "p", JoinKind.LeftOuter), "p", {"VrPrimero"}),
+        each Number.Round([Vr Unitario] ?? 0, 2) <> [VrPrimero])[IndiceFila]),
+    ReordenadoDesc = Table.Sort(Table.ReplaceValue(Reordenado, each [DescFinal], each
+        if [Tipo] = "Actividad" and List.Contains(FilasDescDistinta, [IndiceFila]) then [DescFinal] & " (" & [Código] & ")" else [DescFinal],
+        Replacer.ReplaceValue, {"DescFinal"}), {{"IndiceFila", Order.Ascending}}),
+
+    ReordenadoLlave = Table.AddColumn(ReordenadoDesc, "LlaveInsumo", each if [Tipo] = "Insumo" then Text.Trim(Text.BeforeDelimiter([DescFinal], "-")) else null),
     JoinSeguimiento = Table.NestedJoin(ReordenadoLlave, {"LlaveInsumo"}, DiccionarioSeguimiento, {"CodigoSeg"}, "SegGroup", JoinKind.LeftOuter),
     ExpandSeguimiento = Table.ExpandTableColumn(JoinSeguimiento, "SegGroup", {"TipoInsumoSeg"}, {"TipoInsumoSeg"}),
 
