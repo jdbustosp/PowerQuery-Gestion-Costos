@@ -22,6 +22,7 @@ y conservan entre refrescos lo que escribe el flujo (`FxConservarEstado`).
 | ORDENES_COMPRA | ORDENES COMPRA | INFORMEORDEN + ESTADO DE ORDENES |
 | ASIGNACION_OC | ASIGNACION | INFORMEORDEN + ESTADO DE ORDENES |
 | ENTRADAS (tabla ENTRADAS_SINCO) | ENTRADAS | Informe masivo de entradas + Facturacion de entradas y actas |
+| ACTAS (tabla ACTAS_SINCO) | ACTAS | Detallado actas + Informe relacion de pagos (factura); cantidad por valor cuando el grupo junta varias lineas |
 
 ## Limitación conocida (2026-11-05): códigos de actividad repetidos
 
