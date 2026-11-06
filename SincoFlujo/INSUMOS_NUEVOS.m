@@ -7,7 +7,7 @@
 //   D UM  E GRUPO ("OTROS")  F COD ACTIVIDAD  G ESTADO CREACION
 //   H ESTADO ASOCIACION  I ES NUEVO (SI/NO)  J VR UNITARIO (proyectado)
 //   K CANT APU = cantidad proyectada del insumo / cantidad de la actividad en
-//     el APU (si la actividad no trae cantidad, la cantidad proyectada)
+//     el APU (si la actividad no trae cantidad, la cantidad proyectada), 10 decimales
 // G y H los escribe el flujo y se conservan (clave COD ACTIVIDAD|INSUMO); el
 // OK de creacion se copia a las demas filas del mismo insumo, y las filas cuyo
 // par ya esta en el APU salen (paso 4).
@@ -131,10 +131,12 @@ let
         #"COD ACTIVIDAD" = r[ActCod],
         #"ES NUEVO (SI/NO)" = if List.Contains(InsumosApu, r[InsCod]) then "NO" else "SI",
         #"VR UNITARIO" = r[ProyVrU],
+        // SINCO guarda CANT APU x cantidad de la actividad: con 6 decimales una cantidad chica se distorsiona
+        // (0,000013 x 237.363,65 = 3,09 en vez de 3), por eso va con 10.
         #"CANT APU" =
             if r[ProyCant] = null then null
-            else if r[CantAct] = null or r[CantAct] = 0 then Number.Round(r[ProyCant], 6)
-            else Number.Round(r[ProyCant] / r[CantAct], 6)
+            else if r[CantAct] = null or r[CantAct] = 0 then Number.Round(r[ProyCant], 10)
+            else Number.Round(r[ProyCant] / r[CantAct], 10)
     ])),
     NuevoTabla = if Table.RowCount(Ordenado) = 0
         then #table({"ACTIVIDAD","INSUMO","TIPO","UM","GRUPO","COD ACTIVIDAD","ES NUEVO (SI/NO)","VR UNITARIO","CANT APU"}, {})
