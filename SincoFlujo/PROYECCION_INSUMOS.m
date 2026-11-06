@@ -11,7 +11,7 @@
 // Cantidad grupo x Cantidad detalle): la cantidad sube a la contratada (redondeada
 // hacia arriba a 2 decimales) y el valor unitario baja para conservar el valor total
 // proyectado; SINCO no deja contratar mas cantidad que la proyectada. Si el valor
-// contratado supera el proyectado hasta en 1 peso (redondeo), el total sube al contratado.
+// contratado supera el proyectado (cualquier monto), el total sube al contratado.
 let
     SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
     Headers = [Accept="application/json;odata=nometadata"],
@@ -108,11 +108,11 @@ let
                 ConNueva = Table.AddColumn(ConC, "NuevaCant", each
                     let c = if [CantC] = null then 0 else Number.RoundUp(Number.Round([CantC] * 100, 6)) / 100
                     in if c > [ProyCant] + 0.000001 then c else [ProyCant], type number),
-                // Valor contratado mayor que el proyectado por redondeo (hasta 1 peso): el total sube al contratado
-                // (centavos hacia arriba). Diferencias mayores no se tocan: SINCO las rechaza y quedan como error.
+                // Valor contratado mayor que el proyectado (cualquier monto): el total sube al contratado
+                // (centavos hacia arriba). Lo contratado nunca puede quedar por encima de lo proyectado.
                 ConTotal = Table.AddColumn(ConNueva, "NuevoTotal", each
                     let t = [ProyCant] * [ProyVrU], v = if [ValC] = null then 0 else Number.RoundUp(Number.Round([ValC] * 100, 6)) / 100
-                    in if v > t + 0.005 and v - t <= 1 then v else t, type number),
+                    in if v > t + 0.005 then v else t, type number),
                 Difieren = Table.SelectRows(ConTotal, each Number.Abs([ProyCant] - [PresCant]) > 0.001 or Number.Abs([ProyVrU] - [PresVrU]) > 0.001
                     or [NuevaCant] <> [ProyCant] or [NuevoTotal] <> [ProyCant] * [ProyVrU]),
                 Salida = Table.FromRecords(Table.TransformRows(Difieren, (r) => [
