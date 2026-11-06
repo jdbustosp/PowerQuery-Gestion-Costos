@@ -165,9 +165,17 @@ let
             rendNum = try Number.FromText(rendStr, "en-US") otherwise try Number.FromText(rendStr, "es-ES") otherwise null,
 
             vrUnitCol_I_Str = if esInsumo then FxLimpiarCelda([Columna6]) else null,
-            vrUnitNum = try Number.FromText(vrUnitCol_I_Str, "en-US") otherwise try Number.FromText(vrUnitCol_I_Str, "es-ES") otherwise null
+            vrUnitNum = try Number.FromText(vrUnitCol_I_Str, "en-US") otherwise try Number.FromText(vrUnitCol_I_Str, "es-ES") otherwise null,
+
+            // El informe APU muestra la cantidad redondeada (p. ej. 4 decimales: 0,0394) pero su Vr unitario
+            // sale de la cantidad completa (0,03938). SINCO recalcula Cant APU x Rend x precio, asi que si no
+            // cuadra se recupera la cantidad del propio informe: Vr unitario / (precio x Rend), 8 decimales.
+            rendCalc = if rendNum = null or rendNum = 0 then 1 else rendNum,
+            cantApuFinal = if cantApuNum <> null and vrUnitSinIvaNum <> null and vrUnitSinIvaNum <> 0 and vrUnitNum <> null
+                    and Number.Abs(cantApuNum * rendCalc * vrUnitSinIvaNum - vrUnitNum) > 0.005
+                then Number.Round(vrUnitNum / (vrUnitSinIvaNum * rendCalc), 8) else cantApuNum
         in
-            [Tipo = tipoFila, Código = codigoFinal, Descripción = descProvisional, UM = umFinal, Cantidad = cantNum, CantAPU = cantApuNum, VrUnitSinIVA = vrUnitSinIvaNum, Rend = rendNum, VrUnitario_Temp = vrUnitNum]
+            [Tipo = tipoFila, Código = codigoFinal, Descripción = descProvisional, UM = umFinal, Cantidad = cantNum, CantAPU = cantApuFinal, VrUnitSinIVA = vrUnitSinIvaNum, Rend = rendNum, VrUnitario_Temp = vrUnitNum]
     ),
 
     Expandido = Table.ExpandRecordColumn(Clasificador, "Datos", {"Tipo", "Código", "Descripción", "UM", "Cantidad", "CantAPU", "VrUnitSinIVA", "Rend", "VrUnitario_Temp"}),
