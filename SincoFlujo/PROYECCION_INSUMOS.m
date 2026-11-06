@@ -57,7 +57,7 @@ let
                         c3 = Limpiar(Record.Field(r, "Columna4"))
                     in
                         if c0 = "" or c0 = "Cod" or Text.StartsWith(c0, "SubCapitulo") then "Otro"
-                        else if c2 <> "" and c3 <> "" and EsCodigoInsumo(c0) then "Insumo"
+                        else if c2 <> "" and EsCodigoInsumo(c0) then "Insumo"  // sin UM tambien es insumo
                         else if EsCodigoActividad(c0) and Text.EndsWith(c0, ".000") then "Capitulo"
                         else if EsCodigoActividad(c0) then "Actividad"
                         else "Otro",

@@ -4,7 +4,7 @@
 // existe en ninguna actividad del APU, crearlo antes en el maestro.
 // Columnas fijas (subflujos NUEVOS INSUMOS y ASOCIAR INSUMOS):
 //   A ACTIVIDAD (codigo - descripcion)  B INSUMO (descripcion)  C TIPO
-//   D UM  E GRUPO ("OTROS")  F COD ACTIVIDAD  G ESTADO CREACION
+//   D UM (si SEGUIMIENTO no la trae, "Un")  E GRUPO ("OTROS")  F COD ACTIVIDAD  G ESTADO CREACION
 //   H ESTADO ASOCIACION  I ES NUEVO (SI/NO)  J VR UNITARIO (proyectado)
 //   K CANT APU = cantidad proyectada del insumo / cantidad de la actividad en
 //     el APU (si la actividad no trae cantidad, la cantidad proyectada), 10 decimales
@@ -65,7 +65,7 @@ let
             c3 = Limpiar(Record.Field(r, "Columna4"))
         in
             if c0 = "" or c0 = "Cod" or Text.StartsWith(c0, "SubCapitulo") then "Otro"
-            else if c2 <> "" and c3 <> "" and EsCodigoInsumo(c0) then "Insumo"
+            else if c2 <> "" and EsCodigoInsumo(c0) then "Insumo"  // sin UM tambien es insumo
             else if EsCodigoActividad(c0) and Text.EndsWith(c0, ".000") then "Capitulo"
             else if EsCodigoActividad(c0) then "Actividad"
             else "Otro",
@@ -80,7 +80,7 @@ let
         Table.FromRecords(Table.TransformRows(InsumosSeg, (r) => [
             ActCod = r[ActCod], ActDesc = r[ActDesc],
             InsCod = Limpiar(r[Columna1]), InsDesc = Text.Trim(Text.Replace(Limpiar(r[Columna2]), "160;", "")),
-            Tipo = Limpiar(r[Columna3]), UM = Limpiar(r[Columna4]),
+            Tipo = Limpiar(r[Columna3]), UM = let u = Limpiar(r[Columna4]) in if u = "" then "Un" else u,
             ProyCant = FxNum(r[Columna8]), ProyVrU = FxNum(r[Columna9])
         ]), type table [ActCod = text, ActDesc = text, InsCod = text, InsDesc = text, Tipo = text, UM = text, ProyCant = nullable number, ProyVrU = nullable number]),
         {"ActCod", "InsCod"}
