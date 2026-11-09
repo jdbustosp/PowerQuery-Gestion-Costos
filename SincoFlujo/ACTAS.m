@@ -14,14 +14,24 @@
 // Clave del estado: Cod Contrato | Acta origen | Linea.
 // Codigo de item repetido en el APU (PLANTILLA lo renumera a .901...): la Linea es el codigo SINCO de la
 // ocurrencia que el contrato tiene como grupo en CONTRATOS_SINCO; si tiene varias, se elige por la
-// descripcion del concepto (MAPA_ACT_SINCO); si no se distingue, "AMBIGUO <cod>".
+// descripcion del concepto. Si aun no se distingue (decision de Juan 2026-11-09), la linea va a la
+// ocurrencia cuya cantidad del APU es igual a la del acta (y le cabe); si no, llena en orden del APU lo que
+// le falta a cada grupo del contrato (lo que sobre va a la ultima); el valor se parte en proporcion.
 let
     MapaAct = FxGitHub("MAPA_ACT_SINCO"),
-    FnItemActa = (c as text, item as text, desc as nullable text) as text =>
-        if not List.Contains(MapaAct[Repetidos], item) then item
+    OccA = List.Buffer(Table.ToRecords(MapaAct[Ocurrencias])),
+    CantApu = Record.FromList(List.Transform(OccA, each if [Cantidad] = null then 0 else [Cantidad]), List.Transform(OccA, each "k" & [CodSinco])),
+    // Candidatos del item en el contrato: {uno} si se distingue; varios si hay que repartir
+    FnCandsActa = (c as text, item as text, desc as nullable text) as list =>
+        if not List.Contains(MapaAct[Repetidos], item) then {item}
         else
-            let cands = List.Select(MapaAct[Candidatos](item), each Record.HasFields(MapaGrupo, "k" & c & "|" & _))
-            in if List.Count(cands) = 1 then cands{0} else MapaAct[Resolver](item, null, null, desc, null, null),
+            let
+                cands = List.Select(MapaAct[Candidatos](item), each Record.HasFields(MapaGrupo, "k" & c & "|" & _)),
+                rp = MapaAct[Repartir](item, null, null, desc, null, null)
+            in if List.Count(cands) = 1 then cands
+               else if List.Count(cands) = 0 then {MapaAct[Resolver](item, null, null, desc, null, null)}
+               else if List.Count(rp) = 1 and List.Contains(cands, rp{0}[Cod]) then {rp{0}[Cod]}
+               else cands,
     Cols = {"Cod Contrato","Contrato SINCO","Linea (numero o grupo)","Cantidad","ESTADO","Acta origen","Fecha acta","Valor acta","Factura"},
     ColsBase = List.RemoveItems(Cols, {"ESTADO"}),
     SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
@@ -73,16 +83,53 @@ let
 
     // Detallado actas: Concepto (n - item - descripcion - id - ubicacion) | Tipo | UM | Contrato | Acta | Fecha | Cantidad | Vr. Unitario | Vr. IVA | Vr. Total
     Detalle = Table.SelectRows(LeerHtml(FnGetBinario("DETALLADO ACTAS"), 10), each EsNumero([Columna4]) and EsNumero([Columna5])),
-    Lineas = Table.FromRecords(Table.TransformRows(Detalle, (r) =>
+    Lineas0 = Table.FromRecords(Table.TransformRows(Table.AddIndexColumn(Detalle, "__I", 0, 1), (r) =>
         let p = List.Transform(Text.Split(Limpiar(r[Columna1]), " - "), Text.Trim)
         in [C = Limpiar(r[Columna4]), Acta = Number.From(Limpiar(r[Columna5])), Fecha = Limpiar(r[Columna6]),
-            Item = if List.Count(p) > 1 then FnItemActa(Limpiar(r[Columna4]), p{1}, if List.Count(p) > 4 then Text.Combine(List.Range(p, 2, List.Count(p) - 4), " - ") else if List.Count(p) > 2 then p{2} else null) else "", Linea = p{0} & "|" & (if List.Count(p) > 3 then p{List.Count(p) - 2} else ""),
-            Cant = FxNum(r[Columna7]), Valor = FxNum(r[Columna10])]),
-        type table [C = text, Acta = number, Fecha = text, Item = text, Linea = text, Cant = number, Valor = number]),
+            ItemO = if List.Count(p) > 1 then p{1} else "",
+            Cands = if List.Count(p) > 1 then FnCandsActa(Limpiar(r[Columna4]), p{1}, if List.Count(p) > 4 then Text.Combine(List.Range(p, 2, List.Count(p) - 4), " - ") else if List.Count(p) > 2 then p{2} else null) else {""},
+            Linea = p{0} & "|" & (if List.Count(p) > 3 then p{List.Count(p) - 2} else ""),
+            Cant = FxNum(r[Columna7]), Valor = FxNum(r[Columna10]), __I = r[__I]]),
+        type table [C = text, Acta = number, Fecha = text, ItemO = text, Cands = list, Linea = text, Cant = number, Valor = number, __I = number]),
+    TipoLin = type table [C = text, Acta = number, Fecha = text, Linea = text, Cant = number, Valor = number, Item = text, ItemO = text],
+    Lineas1 = Table.FromRecords(Table.TransformRows(Table.SelectRows(Lineas0, each List.Count([Cands]) = 1), (f) =>
+        [C = f[C], Acta = f[Acta], Fecha = f[Fecha], Linea = f[Linea], Cant = f[Cant], Valor = f[Valor], Item = f[Cands]{0}, ItemO = f[ItemO]]), TipoLin),
+    // Reparto de las lineas que el contrato tiene en varias ocurrencias, en orden de acta
+    GruposN = Table.Group(Table.SelectRows(Lineas0, each List.Count([Cands]) > 1), {"C", "ItemO"},
+        {{"T", each Table.Sort(_, {{"Acta", Order.Ascending}, {"__I", Order.Ascending}}), type table}}),
+    LineasN = List.Combine(List.Transform(Table.ToRecords(GruposN), (g) =>
+        let
+            filas = Table.ToRecords(g[T]),
+            cands = filas{0}[Cands],
+            // item con varias lineas en el origen: se pasa por valor (la cantidad de cada linea no es la del grupo),
+            // asi que se llena por el valor que le falta a cada grupo
+            porV = List.Count(List.Distinct(List.Transform(filas, each [Linea]))) > 1,
+            ini = Record.FromList(List.Transform(cands, each Record.Field(Record.FieldOrDefault(MapaGrupo, "k" & g[C] & "|" & _, [CG = 0, ValC = 0]), if porV then "ValC" else "CG")), cands),
+            pasos = List.Accumulate(filas, [Pend = ini, Out = {}], (s, f) =>
+                let
+                    q = if porV then f[Valor] else f[Cant],
+                    exacto = List.Select(cands, each Number.Abs(Record.FieldOrDefault(CantApu, "k" & _, -1) - f[Cant]) <= 0.01 and Record.Field(s[Pend], _) >= q - 0.01),
+                    llen = List.Accumulate(cands, [Resto = q, P = {}], (a, cd) =>
+                        let t = Number.Round(List.Max({0, List.Min({a[Resto], Record.Field(s[Pend], cd)})}), 10)
+                        in if t > 0 then [Resto = Number.Round(a[Resto] - t, 10), P = a[P] & {{cd, t}}] else a),
+                    ult = List.Last(cands),
+                    porLlenado =
+                        if llen[Resto] <= 0 then llen[P]
+                        else if List.Count(llen[P]) > 0 and List.Last(llen[P]){0} = ult then List.RemoveLastN(llen[P], 1) & {{ult, List.Last(llen[P]){1} + llen[Resto]}}
+                        else llen[P] & {{ult, llen[Resto]}},
+                    partes = if q <= 0 then {{cands{0}, q}} else if List.Count(exacto) = 1 then {{exacto{0}, q}} else porLlenado,
+                    pend = List.Accumulate(partes, s[Pend], (pp, x) => Record.TransformFields(pp, {{x{0}, each _ - x{1}}})),
+                    out = List.Transform(partes, (x) => [C = f[C], Acta = f[Acta], Fecha = f[Fecha], Linea = f[Linea],
+                        Cant = if not porV then x{1} else if q = 0 then f[Cant] else f[Cant] * x{1} / q,
+                        Valor = if porV then x{1} else if q = 0 then f[Valor] else f[Valor] * x{1} / q, Item = x{0}, ItemO = g[ItemO]])
+                in [Pend = pend, Out = s[Out] & out])
+        in pasos[Out])),
+    Lineas = Table.Combine({Lineas1, Table.FromRecords(LineasN, TipoLin)}),
     LineasOk = Table.Buffer(Table.SelectRows(Lineas, each [Item] <> "")),
     // Items del contrato con mas de una linea de origen (se pasan por valor)
-    Varias = Table.SelectRows(Table.Group(LineasOk, {"C", "Item"}, {{"N", each List.Count(List.Distinct([Linea])), Int64.Type}}), each [N] > 1),
-    SetVarias = List.Buffer(List.Transform(Table.ToRecords(Varias), each [C] & "|" & [Item])),
+    // (se cuenta sobre el item de origen: sus repartos entre ocurrencias tambien van por valor)
+    Varias = Table.SelectRows(Table.Group(LineasOk, {"C", "ItemO"}, {{"N", each List.Count(List.Distinct([Linea])), Int64.Type}, {"Items", each List.Distinct([Item]), type list}}), each [N] > 1),
+    SetVarias = List.Buffer(List.Distinct(List.Combine(List.Transform(Table.ToRecords(Varias), (v) => List.Transform(v[Items], each v[C] & "|" & _))))),
     PorActa = Table.Group(LineasOk, {"C", "Item", "Acta"}, {{"Fecha", each List.First([Fecha]), type text}, {"Cant", each List.Sum([Cant]), type number}, {"Valor", each List.Sum([Valor]), type number}}),
 
     // Cantidad por valor acumulado, item a item del contrato en orden de acta

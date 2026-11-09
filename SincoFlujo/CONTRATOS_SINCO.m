@@ -17,7 +17,8 @@
 // contrato ya creado heredan su estado, numero SINCO, aprobacion y fechas; las
 // de un grupo ya creado, su ESTADO GRUPO.
 // Codigo de actividad repetido en el APU (PLANTILLA lo renumera a .901...): el grupo es el codigo SINCO
-// de la ocurrencia que tiene ese insumo contratado (MAPA_ACT_SINCO); si no se distingue, "AMBIGUO <cod>".
+// de la ocurrencia que tiene ese insumo contratado (MAPA_ACT_SINCO); si no se distingue, la linea se parte
+// entre las ocurrencias en proporcion (MAPA_ACT_SINCO[Repartir]).
 let
     MapaAct = FxGitHub("MAPA_ACT_SINCO"),
     // ===== 1. Parametros =====
@@ -393,7 +394,7 @@ let
     ConJerarquia = Table.NestedJoin(ExpInsumo, {"Centro de Costos", "CodigoAct"}, MaestroJerarquia, {"Centro de Costos", "Codigo act"}, "JER", JoinKind.LeftOuter),
     ConIndice = Table.ExpandTableColumn(ConJerarquia, "JER", {"Ref.Act"}, {"Ref.Act"}),
 
-    Filas = Table.FromRecords(Table.TransformRows(ConIndice, (r) =>
+    FilasPartes = Table.FromRecords(Table.TransformRows(ConIndice, (r) =>
         let
             // El nombre del contrato manda: la clave de cruce ignora el parentesis y "X (DIA)" y "X (MES)" comparten clave
             insCto = if r[Columna2] = null then "" else Text.Trim(Text.Replace(Text.Replace(Text.From(r[Columna2]), "#(00A0)", " "), "160;", "")),
@@ -404,9 +405,9 @@ let
         in [
             #"Cod Contrato" = r[Cod Contrato],
             Descripcion = FnQuitarTildes(Text.Combine(List.Transform(List.Select({r[Descripcion contrato], r[Nombre Contratista], r[Cod Contrato]}, each _ <> null and Text.Trim(Text.From(_)) <> ""), Text.From), " / ")),
-            Grupo = if List.Contains(MapaAct[Repetidos], r[CodigoAct])
-                then MapaAct[Resolver](r[CodigoAct], null, r[Columna2], r[Descripcion contrato], r[Cantidad Contratado], "Contratado")
-                else r[CodigoAct],
+            Partes = if List.Contains(MapaAct[Repetidos], r[CodigoAct])
+                then MapaAct[Repartir](r[CodigoAct], null, r[Columna2], r[Descripcion contrato], r[Cantidad Contratado], "Contratado")
+                else {[Cod = r[CodigoAct], Factor = 1]},
             UMGrupo = FnQuitarTildes(sepAct[UM]),
             Insumo = FnQuitarTildes(insTxt),
             Cant = if r[Cantidad Contratado] = null then 0 else r[Cantidad Contratado],
@@ -415,7 +416,12 @@ let
             NitC = FnNitContratista(r[Cod Contrato], r[Nombre Contratista]),
             __Orden = r[__Orden]
         ]),
-        type table [#"Cod Contrato" = text, Descripcion = text, Grupo = text, UMGrupo = nullable text, Insumo = text, Cant = number, VT = number, NombreC = nullable text, NitC = nullable text, __Orden = number]),
+        type table [#"Cod Contrato" = text, Descripcion = text, Partes = list, UMGrupo = nullable text, Insumo = text, Cant = number, VT = number, NombreC = nullable text, NitC = nullable text, __Orden = number]),
+    // Codigo repetido que el origen no distingue (contrato de varias etapas): la linea se parte entre las
+    // ocurrencias (MAPA_ACT_SINCO[Repartir]); cantidad y valor en proporcion
+    Filas = Table.FromRecords(List.Combine(Table.TransformRows(FilasPartes, (r) =>
+        List.Transform(r[Partes], (pt) => Record.RemoveFields(r, "Partes") & [Grupo = pt[Cod], Cant = r[Cant] * pt[Factor], VT = (if r[VT] = null then 0 else r[VT]) * pt[Factor]]))),
+        type table [#"Cod Contrato" = text, Descripcion = text, UMGrupo = nullable text, Insumo = text, Cant = number, VT = number, NombreC = nullable text, NitC = nullable text, __Orden = number, Grupo = text]),
 
     // Un mismo insumo repetido en la actividad del contrato se suma en una fila
     Agrupado = Table.Group(Filas, {"Cod Contrato", "Grupo", "Insumo"}, {

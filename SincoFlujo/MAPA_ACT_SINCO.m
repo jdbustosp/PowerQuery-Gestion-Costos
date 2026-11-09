@@ -10,9 +10,14 @@
 //   2. la unica con cantidad > 0 del insumo en el campo pedido ("Contratado", "Comprado", "Consumido");
 //   3. la unica cuya descripcion empieza por la descripcion dada;
 //   4. la unica con la cantidad del insumo igual a cant (margen 0,01).
-// Si no queda una sola: "AMBIGUO <cod>" (visible en el libro; el motor no lo ejecuta). Nunca adivina.
-// Devuelve un registro: Repetidos (lista), Candidatos(cod) (lista de codigos SINCO), Ocurrencias (tabla),
-// PorPosicionSeg (tabla posicion de la fila de actividad en el Seguimiento -> CodSinco) y Resolver.
+// Si no queda una sola (decision de Juan 2026-11-09: el flujo corre en productivo y decide solo):
+//   Resolver devuelve la primera de las que quedan en el orden del APU (salidas, OC);
+//   Repartir(...) devuelve la lista [Cod, Factor] para partir la linea entre las que quedan, en proporcion a
+//   la cantidad del campo pedido en el Seguimiento o, si no hay, a la cantidad del APU (contratos que cubren
+//   varias etapas: 466 ml = 5 x 93,2).
+// Devuelve un registro: Repetidos (lista), Candidatos(cod) (lista de codigos SINCO, orden APU), Ocurrencias
+// (tabla con Cantidad del APU), PorPosicionSeg (posicion de la actividad en el Seguimiento -> CodSinco),
+// Resolver y Repartir.
 let
     SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
     Headers = [Accept="application/json;odata=nometadata"],
@@ -127,7 +132,7 @@ let
     OccConSeg = Table.ExpandTableColumn(Table.NestedJoin(OccApu, {"Codigo", "DescN", "Ord"}, SegOrd, {"Codigo", "DescN", "Ord"}, "s", JoinKind.LeftOuter), "s", {"PosSeg"}),
     OccConIns = Table.ExpandTableColumn(Table.NestedJoin(OccConSeg, {"PosSeg"}, InsPorAct, {"PosAct"}, "i", JoinKind.LeftOuter), "i", {"Ins"}),
     Ocurrencias = Table.Buffer(Table.Sort(Table.SelectColumns(Table.TransformColumns(OccConIns, {{"Ins", each if _ = null then {} else _, type list}}),
-        {"Codigo", "CodSinco", "DescN", "IndiceFila", "PosSeg", "Ins"}), {{"IndiceFila", Order.Ascending}})),
+        {"Codigo", "CodSinco", "DescN", "IndiceFila", "PosSeg", "Ins", "Cantidad"}), {{"IndiceFila", Order.Ascending}})),
     OccRegs = List.Buffer(Table.ToRecords(Ocurrencias)),
 
     Candidatos = (cod as nullable text) as list =>
@@ -135,37 +140,57 @@ let
             if not List.Contains(Repetidos, c) then {c}
             else List.Transform(List.Select(OccRegs, each [Codigo] = c), each [CodSinco]),
 
-    Resolver = (cod as nullable text, codIns as nullable text, insumo as nullable text, desc as nullable text, cant as nullable number, campo as nullable text) as nullable text =>
+    Elegir = (cod as nullable text, codIns as nullable text, insumo as nullable text, desc as nullable text, cant as nullable number, campo as nullable text) as record =>
         let
-            c = Limpiar(cod)
-        in
+            c = Limpiar(cod),
+            occ = List.Select(OccRegs, each [Codigo] = c),
+            ci = Limpiar(codIns),
+            cl = FnClave(insumo),
+            casa = (i as record) as logical => if ci <> "" then i[CodIns] = ci else cl <> "" and i[Clave] = cl,
+            insDe = (o as record) as list => List.Select(o[Ins], casa),
+            f = Limpiar(campo),
+            qtyDe = (o as record) as number => if f = "" then 0 else List.Sum(List.Transform(insDe(o), each Record.FieldOrDefault(_, f, 0))) ?? 0,
+            p1 = List.Select(occ, each List.Count(insDe(_)) > 0),
+            pool1 = if List.Count(p1) > 0 then p1 else occ,
+            p2 = if f = "" then {} else List.Select(pool1, each qtyDe(_) > 0),
+            pool2 = if List.Count(p2) > 0 then p2 else pool1,
+            d = FxNormDesc(desc),
+            p3 = if d = "" then {} else List.Select(pool2, each Text.StartsWith([DescN], d)),
+            pool3 = if List.Count(p3) > 0 then p3 else pool2,
+            p4 = if cant = null or f = "" then {} else List.Select(pool3, each Number.Abs(qtyDe(_) - cant) <= 0.01),
+            elegido =
+                if List.Count(p1) = 1 then p1{0}
+                else if List.Count(p2) = 1 then p2{0}
+                else if List.Count(p3) = 1 then p3{0}
+                else if List.Count(p4) = 1 then p4{0}
+                else if List.Count(pool3) = 1 then pool3{0}
+                else null
+        in [C = c, Elegido = elegido, Pool = pool3, QtyDe = qtyDe],
+
+    Resolver = (cod as nullable text, codIns as nullable text, insumo as nullable text, desc as nullable text, cant as nullable number, campo as nullable text) as nullable text =>
+        let c = Limpiar(cod) in
             if c = "" then cod
             else if not List.Contains(Repetidos, c) then c
             else
+                let e = Elegir(cod, codIns, insumo, desc, cant, campo) in
+                    if e[Elegido] <> null then e[Elegido][CodSinco]
+                    else if List.Count(e[Pool]) > 0 then e[Pool]{0}[CodSinco]
+                    else c,
+
+    Repartir = (cod as nullable text, codIns as nullable text, insumo as nullable text, desc as nullable text, cant as nullable number, campo as nullable text) as list =>
+        let c = Limpiar(cod) in
+            if c = "" or not List.Contains(Repetidos, c) then {[Cod = c, Factor = 1]}
+            else
                 let
-                    occ = List.Select(OccRegs, each [Codigo] = c),
-                    ci = Limpiar(codIns),
-                    cl = FnClave(insumo),
-                    casa = (i as record) as logical => if ci <> "" then i[CodIns] = ci else cl <> "" and i[Clave] = cl,
-                    insDe = (o as record) as list => List.Select(o[Ins], casa),
-                    f = Limpiar(campo),
-                    qtyDe = (o as record) as number => if f = "" then 0 else List.Sum(List.Transform(insDe(o), each Record.FieldOrDefault(_, f, 0))) ?? 0,
-                    p1 = List.Select(occ, each List.Count(insDe(_)) > 0),
-                    pool1 = if List.Count(p1) > 0 then p1 else occ,
-                    p2 = if f = "" then {} else List.Select(pool1, each qtyDe(_) > 0),
-                    pool2 = if List.Count(p2) > 0 then p2 else pool1,
-                    d = FxNormDesc(desc),
-                    p3 = if d = "" then {} else List.Select(pool2, each Text.StartsWith([DescN], d)),
-                    pool3 = if List.Count(p3) > 0 then p3 else pool2,
-                    p4 = if cant = null or f = "" then {} else List.Select(pool3, each Number.Abs(qtyDe(_) - cant) <= 0.01),
-                    elegido =
-                        if List.Count(p1) = 1 then p1{0}
-                        else if List.Count(p2) = 1 then p2{0}
-                        else if List.Count(p3) = 1 then p3{0}
-                        else if List.Count(p4) = 1 then p4{0}
-                        else if List.Count(pool3) = 1 then pool3{0}
-                        else null
+                    e = Elegir(cod, codIns, insumo, desc, cant, campo),
+                    pool = e[Pool],
+                    pesoSeg = List.Transform(pool, each e[QtyDe](_)),
+                    pesoApu = List.Transform(pool, each if [Cantidad] = null then 0 else Number.Abs([Cantidad])),
+                    pesos = if List.Sum(pesoSeg) > 0 then pesoSeg else if List.Sum(pesoApu) > 0 then pesoApu else List.Transform(pool, each 1),
+                    tot = List.Sum(pesos)
                 in
-                    if elegido = null then "AMBIGUO " & c else elegido[CodSinco]
+                    if e[Elegido] <> null then {[Cod = e[Elegido][CodSinco], Factor = 1]}
+                    else if List.Count(pool) = 0 then {[Cod = c, Factor = 1]}
+                    else List.Select(List.Transform(List.Positions(pool), each [Cod = pool{_}[CodSinco], Factor = pesos{_} / tot]), each [Factor] > 0)
 in
-    [Repetidos = Repetidos, Candidatos = Candidatos, Ocurrencias = Ocurrencias, PorPosicionSeg = PorPosicionSeg, Resolver = Resolver]
+    [Repetidos = Repetidos, Candidatos = Candidatos, Ocurrencias = Ocurrencias, PorPosicionSeg = PorPosicionSeg, Resolver = Resolver, Repartir = Repartir]
