@@ -10,7 +10,10 @@
 //   por NIT#NOMBRE). Se recalculan.
 // Orden: por salida de origen y linea, para que el flujo agregue las lineas a la misma salida SINCO.
 // SALIDA SINCO se copia a todas las filas de la misma salida de origen.
+// Codigo de item repetido en el APU (PLANTILLA lo renumera a .901...): ITEM es el codigo SINCO de la
+// ocurrencia que tiene ese insumo consumido (MAPA_ACT_SINCO); si no se distingue, "AMBIGUO <cod>".
 let
+    MapaAct = FxGitHub("MAPA_ACT_SINCO"),
     OrigenActual = try Text.Upper(Text.Trim(Origen)) otherwise "SINCO",
     ColsBase = {"Salida origen","Fecha","Vale","Descuento","Observaciones","INSUMO","ITEM","CANTIDAD","UM","Cod insumo origen"},
     ColsEstado = {"ESTADO SALIDA","SALIDA SINCO","ESTADO APROBACION"},
@@ -59,7 +62,8 @@ let
         Descuento = Limpiar(r[Columna3]),
         Observaciones = Limpiar(r[Columna6]),
         INSUMO = Limpiar(r[Columna8]),
-        ITEM = Limpiar(r[Columna9]),
+        ITEM = let it = Limpiar(r[Columna9]) in if List.Contains(MapaAct[Repetidos], it)
+            then MapaAct[Resolver](it, Limpiar(r[Columna7]), Limpiar(r[Columna8]), null, FxNum(r[Columna11]), "Consumido") else it,
         CANTIDAD = Number.Round(FxNum(r[Columna11]), 4),
         UM = Limpiar(r[Columna10]),
         #"Cod insumo origen" = Limpiar(r[Columna7]),

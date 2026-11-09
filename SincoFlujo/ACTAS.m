@@ -12,7 +12,16 @@
 // redondeado a 10 decimales y sin pasar la cantidad del grupo; desde 99,9999 % del valor cierra en ella.
 // Cada fila lleva la diferencia con el acumulado anterior. Filas en cantidad 0 no van.
 // Clave del estado: Cod Contrato | Acta origen | Linea.
+// Codigo de item repetido en el APU (PLANTILLA lo renumera a .901...): la Linea es el codigo SINCO de la
+// ocurrencia que el contrato tiene como grupo en CONTRATOS_SINCO; si tiene varias, se elige por la
+// descripcion del concepto (MAPA_ACT_SINCO); si no se distingue, "AMBIGUO <cod>".
 let
+    MapaAct = FxGitHub("MAPA_ACT_SINCO"),
+    FnItemActa = (c as text, item as text, desc as nullable text) as text =>
+        if not List.Contains(MapaAct[Repetidos], item) then item
+        else
+            let cands = List.Select(MapaAct[Candidatos](item), each Record.HasFields(MapaGrupo, "k" & c & "|" & _))
+            in if List.Count(cands) = 1 then cands{0} else MapaAct[Resolver](item, null, null, desc, null, null),
     Cols = {"Cod Contrato","Contrato SINCO","Linea (numero o grupo)","Cantidad","ESTADO","Acta origen","Fecha acta","Valor acta","Factura"},
     ColsBase = List.RemoveItems(Cols, {"ESTADO"}),
     SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
@@ -67,7 +76,7 @@ let
     Lineas = Table.FromRecords(Table.TransformRows(Detalle, (r) =>
         let p = List.Transform(Text.Split(Limpiar(r[Columna1]), " - "), Text.Trim)
         in [C = Limpiar(r[Columna4]), Acta = Number.From(Limpiar(r[Columna5])), Fecha = Limpiar(r[Columna6]),
-            Item = if List.Count(p) > 1 then p{1} else "", Linea = p{0} & "|" & (if List.Count(p) > 3 then p{List.Count(p) - 2} else ""),
+            Item = if List.Count(p) > 1 then FnItemActa(Limpiar(r[Columna4]), p{1}, if List.Count(p) > 4 then Text.Combine(List.Range(p, 2, List.Count(p) - 4), " - ") else if List.Count(p) > 2 then p{2} else null) else "", Linea = p{0} & "|" & (if List.Count(p) > 3 then p{List.Count(p) - 2} else ""),
             Cant = FxNum(r[Columna7]), Valor = FxNum(r[Columna10])]),
         type table [C = text, Acta = number, Fecha = text, Item = text, Linea = text, Cant = number, Valor = number]),
     LineasOk = Table.Buffer(Table.SelectRows(Lineas, each [Item] <> "")),

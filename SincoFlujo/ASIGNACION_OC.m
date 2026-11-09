@@ -8,7 +8,14 @@
 //   G COMPRADO del item = cantidad que asigna el flujo (debe ser > 0: la asignacion
 //     reparte la linea de la OC, se haga o no la entrada)
 // El estado de la asignacion queda en ORDENES COMPRA (ESTADO ASIGNACION).
+// Codigo de item repetido en el APU (PLANTILLA lo renumera a .901...): ACTIVIDAD es el codigo SINCO
+// de la ocurrencia que tiene ese insumo comprado (MAPA_ACT_SINCO, con la descripcion del item).
 let
+    MapaAct = FxGitHub("MAPA_ACT_SINCO"),
+    FnItemSinco = (itemTxt as text, codIns as text, cant as number) as text =>
+        let cod = FnCodigoItem(itemTxt) in
+            if not List.Contains(MapaAct[Repetidos], cod) then cod
+            else MapaAct[Resolver](cod, codIns, null, if Text.Contains(itemTxt, " - ") then Text.AfterDelimiter(itemTxt, " - ") else null, cant, "Comprado"),
     OrigenActual = try Text.Upper(Text.Trim(Origen)) otherwise "SINCO",
     ColsSalida = {"Cod Orden","CAPITULO","ACTIVIDAD","INSUMO","V/U","CONSUMIDO","COMPRADO"},
 
@@ -53,7 +60,7 @@ let
         Capitulo = Limpiar(Record.FieldOrDefault(r, "Capitulo", null)),
         VU = FxNum(Record.Field(r, "Valor Unitario")),
         Comprado = FxNum(Record.Field(r, "Cantidad Comprada")),
-        Item = FnCodigoItem(Limpiar(Record.Field(r, "Ítem")))
+        Item = FnItemSinco(Limpiar(Record.Field(r, "Ítem")), Limpiar(Record.Field(r, "Código")), FxNum(Record.Field(r, "Cantidad Comprada")))
     ]), type table [#"Cod Orden" = text, INSUMO = text, CodIns = text, Capitulo = text, VU = number, Comprado = number, Item = text]),
     ConCompra = Table.Buffer(Table.SelectRows(Lineas, each [Comprado] > 0)),
 

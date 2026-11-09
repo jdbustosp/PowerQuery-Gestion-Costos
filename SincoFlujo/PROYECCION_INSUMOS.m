@@ -12,7 +12,11 @@
 // hacia arriba a 2 decimales) y el valor unitario baja para conservar el valor total
 // proyectado; SINCO no deja contratar mas cantidad que la proyectada. Si el valor
 // contratado supera el proyectado (cualquier monto), el total sube al contratado.
+// Codigos de actividad repetidos (PLANTILLA los renumera a .901...): ACTIVIDAD es el codigo SINCO
+// de ESA ocurrencia del Seguimiento (MAPA_ACT_SINCO); los demas codigos no cambian.
 let
+    Mapa = FxGitHub("MAPA_ACT_SINCO"),
+    Repetidos = Mapa[Repetidos],
     SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
     Headers = [Accept="application/json;odata=nometadata"],
     FnEncode = F_Globales[FnEncode],
@@ -77,7 +81,7 @@ let
                 ])),
                 // Columnas 1-9: Cod, Desc, Tipo, UM, Presupuestado (Cant=5, VrU=6, Tot=7), Proyectado (Cant=8, VrU=9)
                 Cols = List.Transform({1..9}, each {"Columna" & Text.From(_), "td:nth-child(" & Text.From(_) & "), th:nth-child(" & Text.From(_) & ")"}),
-                Tabla = Html.Table(Text.FromBinary(Binario, 65001), Cols, [RowSelector="tr"]),
+                Tabla = Table.AddIndexColumn(Html.Table(Text.FromBinary(Binario, 65001), Cols, [RowSelector="tr"]), "__Pos", 0, 1, Int64.Type),
 
                 Clasificado = Table.AddColumn(Tabla, "Clase", (r as record) =>
                     let
@@ -91,7 +95,14 @@ let
                         else if EsCodigoActividad(c0) then "Actividad"
                         else "Otro",
                     type text),
-                ConActCod = Table.AddColumn(Clasificado, "ActCod", each if [Clase] = "Actividad" then Limpiar([Columna1]) else if [Clase] = "Capitulo" then "" else null, type text),
+                ConActCod0 = Table.AddColumn(Clasificado, "ActCod0", each if [Clase] = "Actividad" then Limpiar([Columna1]) else if [Clase] = "Capitulo" then "" else null, type text),
+                ConActPos = Table.AddColumn(ConActCod0, "ActPos", each if [Clase] = "Actividad" then [__Pos] else null, Int64.Type),
+                MapaPos = if List.Count(Repetidos) = 0 then [] else
+                    let t = Table.SelectRows(Mapa[PorPosicionSeg], each List.Contains(Repetidos, [Codigo]))
+                    in Record.FromList(List.Transform(t[CodSinco], each if _ = null then null else _), List.Transform(t[PosSeg], each "p" & Text.From(_))),
+                ConActCod = Table.AddColumn(ConActPos, "ActCod", each
+                    if [ActCod0] = null or not List.Contains(Repetidos, [ActCod0]) then [ActCod0]
+                    else let s = Record.FieldOrDefault(MapaPos, "p" & Text.From([ActPos]), null) in if s = null then "AMBIGUO " & [ActCod0] else s, type text),
                 FD = Table.FillDown(ConActCod, {"ActCod"}),
 
                 Insumos = Table.SelectRows(FD, each [Clase] = "Insumo" and [ActCod] <> null and [ActCod] <> ""),

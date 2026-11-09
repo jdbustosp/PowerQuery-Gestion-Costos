@@ -16,7 +16,10 @@
 // refrescos con la clave Cod Contrato|Grupo|Insumo. Las filas nuevas de un
 // contrato ya creado heredan su estado, numero SINCO, aprobacion y fechas; las
 // de un grupo ya creado, su ESTADO GRUPO.
+// Codigo de actividad repetido en el APU (PLANTILLA lo renumera a .901...): el grupo es el codigo SINCO
+// de la ocurrencia que tiene ese insumo contratado (MAPA_ACT_SINCO); si no se distingue, "AMBIGUO <cod>".
 let
+    MapaAct = FxGitHub("MAPA_ACT_SINCO"),
     // ===== 1. Parametros =====
     SiteUrl = "https://colsubsidio365.sharepoint.com/sites/MiGerenciaViv",
     ArchivosActual = Table.Buffer(SP_Archivos_Flujo),
@@ -401,7 +404,9 @@ let
         in [
             #"Cod Contrato" = r[Cod Contrato],
             Descripcion = FnQuitarTildes(Text.Combine(List.Transform(List.Select({r[Descripcion contrato], r[Nombre Contratista], r[Cod Contrato]}, each _ <> null and Text.Trim(Text.From(_)) <> ""), Text.From), " / ")),
-            Grupo = r[CodigoAct],
+            Grupo = if List.Contains(MapaAct[Repetidos], r[CodigoAct])
+                then MapaAct[Resolver](r[CodigoAct], null, r[Columna2], r[Descripcion contrato], r[Cantidad Contratado], "Contratado")
+                else r[CodigoAct],
             UMGrupo = FnQuitarTildes(sepAct[UM]),
             Insumo = FnQuitarTildes(insTxt),
             Cant = if r[Cantidad Contratado] = null then 0 else r[Cantidad Contratado],
