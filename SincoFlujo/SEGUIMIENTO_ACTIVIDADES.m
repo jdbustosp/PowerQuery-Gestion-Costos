@@ -71,7 +71,12 @@ let
                         c2 = Limpiar(Record.Field(r, "Columna3")),
                         c3 = Limpiar(Record.Field(r, "Columna4")),
                         esActCod = c0 <> "" and EsCodigoActividad(c0),
-                        esCapitulo = esActCod and Text.EndsWith(c0, ".000")
+                        // SINCO tambien entrega el capitulo como entero ("11"), no solo como "11.000".
+                        // Tipo y UM deben estar vacios para no confundir un insumo numerico con un capitulo.
+                        esCapitulo = c2 = "" and c3 = "" and (
+                            (esActCod and Text.EndsWith(c0, ".000")) or
+                            (c0 <> "" and Text.Select(c0, {"0".."9"}) = c0)
+                        )
                     in
                         // El chequeo de Insumo (Tipo+UM llenos) va PRIMERO: los
                         // codigos de insumo normalmente NO tienen punto (ej "4436"),
@@ -80,8 +85,8 @@ let
                         // encontrarse (siempre devolvia null).
                         if c0 = "" or c0 = "Cod" or Text.StartsWith(c0, "SubCapitulo") then "Otro"
                         else if c2 <> "" and c3 <> "" then "Insumo"
-                        else if not esActCod then "Otro"
                         else if esCapitulo then "Capitulo"
+                        else if not esActCod then "Otro"
                         else "Actividad",
                     type text),
 
