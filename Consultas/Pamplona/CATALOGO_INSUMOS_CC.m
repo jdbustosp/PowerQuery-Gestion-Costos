@@ -3,7 +3,12 @@ let
     Norm = (v as any) as text => let t = try Text.Upper(Text.Trim(F_Globales[FnRemoveAccentMarks](Text.From(v)))) otherwise null
         in if t = null then "" else Text.Combine(List.Select(Text.Split(t, " "), each _ <> ""), " "),
     BDGuardada = Excel.CurrentWorkbook(){[Name="BD"]}[Content],
-    Fuente = Table.SelectColumns(Table.SelectRows(BDGuardada, each [Tipo] = "ITEMS"), {"Centro de Costos", "Codigo ins", "Ins", "Clasificador"}),
+    ClasesGuardadas = Table.SelectColumns(Table.SelectRows(BDGuardada, each [Tipo] = "ITEMS"), {"Centro de Costos", "Codigo ins", "Ins", "Clasificador"}),
+    InsumosActuales = Table.Distinct(Table.TransformColumns(Table.SelectColumns(ITEMSINSUMOS, {"Centro de Costos", "Codigo ins", "Ins"}), {
+        {"Centro de Costos", each if _ = null then "" else Text.Upper(Text.Trim(Text.From(_))), type text},
+        {"Ins", each if _ = null then "" else Text.Upper(Text.Trim(F_Globales[FnRemoveAccentMarks](_))), type text}})),
+    Fuente = Table.ExpandTableColumn(Table.NestedJoin(InsumosActuales, {"Centro de Costos", "Codigo ins", "Ins"},
+        ClasesGuardadas, {"Centro de Costos", "Codigo ins", "Ins"}, "C", JoinKind.LeftOuter), "C", {"Clasificador"}),
     Reales = Table.SelectRows(Fuente, each Norm([Centro de Costos]) <> "" and Norm([Ins]) <> ""),
     Catalogo = Table.Group(Reales, {"Centro de Costos", "Codigo ins", "Ins"}, {
         {"__ClasesBD", each List.Sort(List.Distinct(List.Select(List.Transform([Clasificador], (v) => if v = null then "" else Text.Trim(Text.From(v))), (v) => v <> "" and v <> "zOtros"))), type list}}),

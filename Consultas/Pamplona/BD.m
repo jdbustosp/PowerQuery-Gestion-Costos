@@ -455,8 +455,12 @@ let
         {"__CC", each List.First(List.Select([Centro de Costos], each FnTextoODef(_) <> ""), null), type text},
         {"__MaxCap", each List.Max(List.Transform([Capitulo], each
             try Number.From(Text.BeforeDelimiter(FnTextoODef(_), "-")) otherwise null), 0), type number}})),
-    AdicConCC = Table.ExpandTableColumn(Table.NestedJoin(AdicValidas, {"__Cod"}, CCsBD, {"__Cod"}, "__B", JoinKind.LeftOuter),
+    AdicConCC0 = Table.ExpandTableColumn(Table.NestedJoin(AdicValidas, {"__Cod"}, CCsBD, {"__Cod"}, "__B", JoinKind.LeftOuter),
         "__B", {"__CC", "__MaxCap"}),
+    AdicSinRegistro = Table.SelectColumns(
+        Table.NestedJoin(CCsBD, {"__Cod"}, AdicConCC0, {"__Cod"}, "__Existe", JoinKind.LeftAnti),
+        {"__Cod", "__CC", "__MaxCap"}),
+    AdicConCC = Table.Combine({AdicConCC0, Table.AddColumn(AdicSinRegistro, "__Valor", each 0, type number)}),
     AdicFilas = Table.FromRecords(List.Transform(Table.ToRecords(AdicConCC), (r) => [
         #"Centro de Costos" = if r[__CC] <> null then r[__CC] else FnTextoODef(r[#"Centro de Costos"]),
         Ins = "ADICIONAL",
@@ -681,8 +685,33 @@ let
         if [Tipo] = "CC" and List.Contains({"Contrato", "Orden de compra"}, [Tipo OC]) then ToNumber0([#"Cant. aprobacion"]) else 0, type number),
     ConValorClasificado = Table.AddColumn(ConCantidadClasificada, "VT SINCO clasificado", each
         if [Tipo] = "CC" and List.Contains({"Contrato", "Orden de compra"}, [Tipo OC]) then ToNumber0([#"VR total aprobacion"]) else 0, type number),
-    FinalRecortada = Table.SelectColumns(ConValorClasificado, ColumnasFinalesArboleda & {"OC", "Tipo OC", "CC OC", "Contratista OC", "Clasificador OC", "Factura", "Invertido factura", "No_Prov seg", "Fila real", "Aseg prov", "Comp prov", "Inv prov", "Desc prov", "Teorico fijo", "Clasif desperdicio", "Contratista almacen", "VT Adicionales",
-        "Cant. entradas", "Cant. salidas", "Cant. teorica", "Material", "Tipologia", "TipoElemento", "Piso", "Codigo ins", "Cantidad SINCO clasificado", "VT SINCO clasificado"}, MissingField.UseNull),
+    FnClaveAseg = (r as record, nivel as number) as nullable text =>
+        let oc = FnOCKeyValida(r[#"# OC / Contrato"]),
+            cc = FnClaveMaestro(r[Centro de Costos]),
+            ins = FnClaveMaestro(r[Ins]),
+            act = FnParseCodAct(r[Codigo act], r[Actividad])
+        in if oc = null or cc = "" or (nivel > 0 and ins = "") or (nivel > 1 and act = "") then null
+           else cc & "|" & oc & (if nivel > 0 then "|" & ins else "") & (if nivel > 1 then "|" & act else ""),
+    PuenteAseg = Table.Buffer(Table.SelectRows(FilasPuente, each
+        not List.Contains({"SIN CUADRO COMPARATIVO", "POR ADJUDICAR"}, FnClaveComp(_)))),
+    CompAsegExacto = FnMapaUnico(PuenteAseg, each FnClaveAseg(_, 2), "# CC - Comparativo"),
+    CompAsegInsumo = FnMapaUnico(PuenteAseg, each FnClaveAseg(_, 1), "# CC - Comparativo"),
+    CompAsegOC = FnMapaUnico(PuenteAseg, each FnClaveAseg(_, 0), "# CC - Comparativo"),
+    ConComparativoAseg0 = Table.AddColumn(ConValorClasificado, "__ComparativoAseg", each
+        if [Tipo] = "CONTRATO" or ([Tipo] = "COMPRAS" and ToNumber0([VT Asegurada]) <> 0) then
+            let a = FnBuscar(CompAsegExacto, FnClaveAseg(_, 2)),
+                b = if a <> null then a else FnBuscar(CompAsegInsumo, FnClaveAseg(_, 1)),
+                c = if b <> null then b else FnBuscar(CompAsegOC, FnClaveAseg(_, 0))
+            in if c = null then "SIN CUADRO COMPARATIVO" else c
+        else [#"# CC - Comparativo"], type text),
+    ConComparativoAseg = Table.RenameColumns(
+        Table.RemoveColumns(ConComparativoAseg0, {"# CC - Comparativo"}), {{"__ComparativoAseg", "# CC - Comparativo"}}),
+    ConCantidadAsegSINCO = Table.AddColumn(ConComparativoAseg, "Cantidad asegurada SINCO", each
+        if [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS" then ToNumber0([Cantidad asegurada]) else 0, type number),
+    ConValorAsegSINCO = Table.AddColumn(ConCantidadAsegSINCO, "VT asegurado SINCO", each
+        if [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS" then ToNumber0([VT Asegurada]) else 0, type number),
+    FinalRecortada = Table.SelectColumns(ConValorAsegSINCO, ColumnasFinalesArboleda & {"OC", "Tipo OC", "CC OC", "Contratista OC", "Clasificador OC", "Factura", "Invertido factura", "No_Prov seg", "Fila real", "Aseg prov", "Comp prov", "Inv prov", "Desc prov", "Teorico fijo", "Clasif desperdicio", "Contratista almacen", "VT Adicionales",
+        "Cant. entradas", "Cant. salidas", "Cant. teorica", "Material", "Tipologia", "TipoElemento", "Piso", "Codigo ins", "Cantidad SINCO clasificado", "VT SINCO clasificado", "Cantidad asegurada SINCO", "VT asegurado SINCO"}, MissingField.UseNull),
 
     TablaMaestraFinal = Table.Buffer(FinalRecortada)
 in
