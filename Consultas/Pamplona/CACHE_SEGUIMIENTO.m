@@ -6,7 +6,8 @@ let
     FirmaParser = Binary.ToText(Binary.Compress(CodigoParser, Compression.Deflate), BinaryEncoding.Base64),
     ColumnasCache = {"Centro de Costos", "Firma", "Parte", "Partes", "Datos"},
     Prev0 = try Excel.CurrentWorkbook(){[Name="CACHE_SEGUIMIENTO"]}[Content] otherwise #table(ColumnasCache, {}),
-    Prev = Table.Buffer(Table.SelectColumns(Prev0, ColumnasCache, MissingField.UseNull)),
+    Prev = Table.Buffer(Table.TransformColumns(Table.SelectColumns(Prev0, ColumnasCache, MissingField.UseNull),
+        {{"Firma", each if _ = null then null else Text.Replace(Text.From(_), "#(cr)", ""), type nullable text}})),
     Forzar = try Logical.From(Excel.CurrentWorkbook(){[Name="FORZAR_RELECTURA_REPORTES"]}[Content]{0}[Column1]) otherwise false,
     Archivos = Table.Buffer(Table.SelectRows(SP_Archivos_Proyecto, each
         Text.Contains([Name], "SEGUIMIENTO POR ITEMS", Comparer.OrdinalIgnoreCase) or
