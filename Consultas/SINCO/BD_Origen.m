@@ -77,9 +77,16 @@ let
 
     FiltroTipoValido = Table.Buffer(Table.SelectRows(LlavesLimpias, each [Tipo] <> null and [Tipo] <> "")),
 
-    FnClaveMaestro = (v as any) as text =>
+    FnClaveMaestro0 = (v as any) as text =>
         let t = LimpiarTexto(FnRemoveAccentMarks(v))
         in if t = null then "" else Text.Upper(t),
+    // Memo: las claves se calculan una vez por texto distinto y se reutilizan (mismo resultado que sin memo)
+    FnMemo = (valores as list, fn as function) as record =>
+        let d = List.Distinct(List.Select(valores, each _ is text and _ <> ""))
+        in Record.FromList(List.Transform(d, fn), d),
+    MemoMaestro = FnMemo(FiltroTipoValido[Centro de Costos] & FiltroTipoValido[Ins], FnClaveMaestro0),
+    FnClaveMaestro = (v as any) as text =>
+        if v is text and Record.HasFields(MemoMaestro, v) then Record.Field(MemoMaestro, v) else FnClaveMaestro0(v),
     MaestroFilas = try Table.SelectRows(
             Table.SelectColumns(Excel.CurrentWorkbook(){[Name = "MaestroInsumos"]}[Content], {"Ins", "Clasificador"}),
             each FnTieneTexto([Clasificador]) and FnClaveMaestro([Ins]) <> "")
@@ -101,7 +108,17 @@ let
         not List.Contains({"", "SIN CUADRO COMPARATIVO", "POR ADJUDICAR", "-", "0"}, Text.Upper(FnTextoODef(v))),
     // El identificador completo se interpreta dentro de su centro de costos.
     // "4659-27-X" y "4659-027-X" representan el mismo comparativo.
+    SepMemo = "#(0001)",
+    MemoComp =
+        let
+            pares = List.Select(List.Zip({FiltroTipoValido[Centro de Costos], FiltroTipoValido[#"# CC - Comparativo"]}), each _{0} is text and _{1} is text),
+            k = List.Distinct(List.Transform(pares, each _{0} & SepMemo & _{1}))
+        in Record.FromList(List.Transform(k, each let p = Text.Split(_, SepMemo) in FnClaveComp0([Centro de Costos = p{0}, #"# CC - Comparativo" = p{1}])), k),
     FnClaveComp = (r as record) as nullable text =>
+        let a = r[Centro de Costos], b = r[#"# CC - Comparativo"],
+            k = if a is text and b is text then a & SepMemo & b else null
+        in if k <> null and Record.HasFields(MemoComp, k) then Record.Field(MemoComp, k) else FnClaveComp0(r),
+    FnClaveComp0 = (r as record) as nullable text =>
         let
             cc = FnClaveMaestro(r[Centro de Costos]),
             prefijo = Text.BeforeDelimiter(cc, "-"),
@@ -175,7 +192,7 @@ let
 
             a0 = if [Tipo] = "CC CONSOLIDADO" then propio else null,
             a1 = if a0 <> null then a0 else FnClasifAprob(_),
-            a2 = if a1 <> null or compOC = "" then a1 else FnClasifAprob(_ & [#"# CC - Comparativo" = compOC]),
+            a2 = if a1 <> null or compOC = "" then a1 else FnClasifAprob([Centro de Costos = [Centro de Costos], Ins = [Ins], #"# CC - Comparativo" = compOC]),
             p1 = if a2 <> null then a2 else if [Tipo] = "PROVISIONES" then propio else null,
             d1 = if p1 <> null then p1 else FnBuscar(ClasifDetComp, comp),
             d2 = if d1 <> null then d1 else FnBuscar(ClasifDetOCIns, ocIns),
@@ -188,7 +205,7 @@ let
                (let a = FnClasifAprob(_) in if a <> null then a else "zOtros")
            else if [__AsegComparativo] <> null then
                if FnCompReal([__AsegComparativo]) then
-                   (let a = FnClasifAprob(_ & [#"# CC - Comparativo" = [__AsegComparativo]])
+                   (let a = FnClasifAprob([Centro de Costos = [Centro de Costos], Ins = [Ins], #"# CC - Comparativo" = [__AsegComparativo]])
                     in if a <> null then a else "zOtros")
                else if m0 <> null then m0 else "zOtros"
            else if m0 <> null then m0 else [__ClasifComp], type text),
@@ -201,7 +218,10 @@ let
         Table.RemoveColumns(BaseClasificada0, {"Clasificador", "__ClasifComp", "__ClasifFinal"}), {{"__Clasif2", "Clasificador"}}),
 
     SufijosSociales = {"SAS", "SA", "SCA", "LTDA", "LIMITADA", "CIA", "Y", "EU", "SENC", "ZOMAC", "BIC", "SUCURSAL"},
+    MemoNombre = FnMemo(FiltroTipoValido[Nombre Contratista], FnClaveNombre0),
     FnClaveNombre = (v as any) as nullable text =>
+        if v is text and Record.HasFields(MemoNombre, v) then Record.Field(MemoNombre, v) else FnClaveNombre0(v),
+    FnClaveNombre0 = (v as any) as nullable text =>
         let
             t = FnTextoODef(v),
             t1 = Text.Replace(Text.Replace(Text.Upper(FnRemoveAccentMarks(t)), ".", ""), "&", "Y"),
@@ -734,16 +754,16 @@ let
     MapaBrutoPar = Record.FromList(BrutoPar[__B], List.Transform(Table.ToRecords(BrutoPar), each FnClavePar([OC], [#"No_Prov seg"]))),
     RestosCero = Table.SelectRows(FilasProvResto, each FnRestoCero(_) and Number.Abs(Record.FieldOrDefault(MapaBrutoPar, FnClavePar([OC], [#"No_Prov seg"]), 0)) < 1),
     MapaParCero = Record.FromList(List.Repeat({true}, Table.RowCount(RestosCero)), List.Transform(Table.ToRecords(RestosCero), each FnClavePar([OC], [#"No_Prov seg"]))),
-    FnFacturaFinal = (r as record) as nullable text =>
-        if r[OC] = null or r[Factura] <> "(sin factura)" then r[Factura]
+    FnFacturaFinal = (oc as any, fac as any, filaReal as any, prov as any) as nullable text =>
+        if oc = null or fac <> "(sin factura)" then fac
         else let
-            ocCero = Record.HasFields(MapaCeroOC, r[OC]) and Record.HasFields(MapaPrimeraOC, r[OC]),
-            esProv = r[Fila real] = null,
-            par = if esProv then FnClavePar(r[OC], r[#"No_Prov seg"]) else "",
+            ocCero = Record.HasFields(MapaCeroOC, oc) and Record.HasFields(MapaPrimeraOC, oc),
+            esProv = filaReal = null,
+            par = if esProv then FnClavePar(oc, prov) else "",
             enPar = if esProv then Record.FieldOrDefault(MapaPrimeraPar, par, null) else null
         in if esProv and enPar <> null and (ocCero or Record.HasFields(MapaParCero, par)) then enPar
-            else if ocCero then Record.Field(MapaPrimeraOC, r[OC]) else r[Factura],
-    ConFacturaFinal = Table.AddColumn(Table.RenameColumns(ConRealBase, {{"Factura", "__FacturaBase"}}), "Factura", each FnFacturaFinal(_ & [Factura = [__FacturaBase]]), type text),
+            else if ocCero then Record.Field(MapaPrimeraOC, oc) else fac,
+    ConFacturaFinal = Table.AddColumn(Table.RenameColumns(ConRealBase, {{"Factura", "__FacturaBase"}}), "Factura", each FnFacturaFinal([OC], [__FacturaBase], [Fila real], [#"No_Prov seg"]), type text),
     ConApoyo = Table.Combine({ConFacturaFinal, FilasProv, FilasTeo}),
 
     ConCantidadClasificada = Table.AddColumn(ConApoyo, "Cantidad SINCO clasificado", each
