@@ -181,7 +181,7 @@ let
             d2 = if d1 <> null then d1 else FnBuscar(ClasifDetOCIns, ocIns),
             d3 = if d2 <> null then d2 else FnBuscar(ClasifDetOC, ocK)
         in d3, type text),
-    Etapa1 = Table.AddColumn(Etapa0, "__ClasifFinal", each
+    Etapa1__ = Table.AddColumn(Etapa0, "__ClasifFinal", each
         let m0 = FnBuscar(ClasifMaestro, FnClaveMaestro([Ins]))
         in if [Tipo] = "CC CONSOLIDADO" then (if FnTieneTexto([Clasificador]) then Text.Trim(Text.From([Clasificador])) else "zOtros")
            else if List.Contains({"CC", "ADJUDICADO"}, [Tipo]) then
@@ -192,6 +192,7 @@ let
                     in if a <> null then a else "zOtros")
                else if m0 <> null then m0 else "zOtros"
            else if m0 <> null then m0 else [__ClasifComp], type text),
+    Etapa1 = Table.Buffer(Etapa1__),  // varios consumidores: se calcula una sola vez
     ClasifPorIns = FnMapaModa(Table.SelectRows(Etapa1, each [__ClasifFinal] <> null and [Tipo] <> "PROVISIONES"), FnClaveIns, "__ClasifFinal"),
     BaseClasificada0 = Table.AddColumn(Etapa1, "__Clasif2", each
         if [__ClasifFinal] <> null then [__ClasifFinal]
@@ -288,13 +289,18 @@ let
         Table.NestedJoin(AddVUAseg, {"Centro de Costos", "Codigo act"}, AsegPorActividad, {"Centro de Costos", "Codigo act"}, "__AA", JoinKind.LeftOuter),
         "__AA", {"vtAsegAct"}),
 
+    // Conjunto (registro) para buscar en O(1) en vez de recorrer la lista en cada fila (List.Contains).
+    FnConjunto = (l as list) as record => let d = List.Distinct(List.Select(l, each _ is text)) in Record.FromList(List.Repeat({true}, List.Count(d)), d),
+    FnEnConjunto = (s as record, v as any) as logical => v is text and Record.HasFields(s, v),
     FnOCKey = (v as any) as text => let k = CleanOCKey(v) in if k = null then "" else k,
     OCsAseguradas = List.Buffer(List.Distinct(List.Transform(
         Table.SelectRows(AddVUAseg, each ([Tipo] = "CONTRATO" or [Tipo] = "COMPRAS") and ToNumber0([VT Asegurada]) <> 0)[#"# OC / Contrato"],
         FnOCKey))),
     ComparativosContratados = List.Buffer(List.Distinct(List.Transform(
-        Table.SelectRows(AddVUAseg, each [Tipo] = "CC" and List.Contains(OCsAseguradas, FnOCKey([#"# OC / Contrato"])) and FnOCKey([#"# OC / Contrato"]) <> "")[#"# CC - Comparativo"],
+        Table.SelectRows(AddVUAseg, each [Tipo] = "CC" and (let k = FnOCKey([#"# OC / Contrato"]) in k <> "" and FnEnConjunto(SetOCsAseguradas, k)))[#"# CC - Comparativo"],
         FnTextoODef))),
+    SetOCsAseguradas = FnConjunto(OCsAseguradas),
+    SetComparativosContratados = FnConjunto(ComparativosContratados),
 
     FnSumaPor = (tipo as text, valorCol as text, claveFn as function) as record =>
         let
@@ -319,7 +325,7 @@ let
         if [Tipo] = "POR ADJUDICAR" then (if ToNumber0([vtAsegAct]) > 0 or FnSincoEnCero(_) then 0 else [#"Valor Total ppto (CC)"])
 
         else if [Tipo] = "ADJUDICADO" then
-            (if List.Contains(ComparativosContratados, FnTextoODef([#"# CC - Comparativo"])) then 0
+            (if FnEnConjunto(SetComparativosContratados, FnTextoODef([#"# CC - Comparativo"])) then 0
              else if ToNumber0([vtAsegAct]) > 0 then 0
              else if FnSincoEnCero(_) then 0
              else [#"Valor Total ppto (CC)"])
@@ -485,10 +491,11 @@ let
     ClasifCompleto0 = Table.AddColumn(BaseAjustes, "__Clasif3", each
         if FnTextoODef([Clasificador]) <> "" then [Clasificador]
         else Record.FieldOrDefault(MapaClasifOC, [__OCd], "zOtros"), type text),
-    ClasifCompleto = Table.TransformColumns(
+    ClasifCompleto__ = Table.TransformColumns(
         Table.RenameColumns(Table.RemoveColumns(ClasifCompleto0, {"Clasificador", "__OCd"}), {{"__Clasif3", "Clasificador"}}),
         {{"# CC - Comparativo", each if FnTextoODef(_) = "" then "SIN CUADRO COMPARATIVO" else _, type text}},
         null, MissingField.Ignore),
+    ClasifCompleto = Table.Buffer(ClasifCompleto__),  // varios consumidores: se calcula una sola vez
     AdicTabla = try Excel.CurrentWorkbook(){[Name = "ADICIONALES"]}[Content] otherwise #table({"Centro de Costos"}, {}),
     AdicValidas = Table.SelectRows(Table.AddColumn(Table.AddColumn(AdicTabla, "__Cod", each
             FnTextoODef(Text.BeforeDelimiter(FnTextoODef(Record.FieldOrDefault(_, "Centro de Costos", null)), "-")), type text),
@@ -552,7 +559,8 @@ let
                else if [Material] <> "MAMPOSTERIA" then Text.Proper([Material])
                else if s <> null then s else "Mamposteria", type text),
         {{"CantTotal", "Cant. teorica"}}),
-    ConTeorico = Table.Combine({ConAlmacen, TeoFilas}),
+    ConTeorico__ = Table.Combine({ConAlmacen, TeoFilas}),
+    ConTeorico = Table.Buffer(ConTeorico__),  // varios consumidores: se calcula una sola vez
 
     FnOCDin = (v as any) as text => Text.Select(FnTextoODef(v), {"0".."9"}),
     FnModaTxt = (l as list) as nullable text =>
@@ -576,6 +584,7 @@ let
         Table.ExpandTableColumn(Table.NestedJoin(DimOC, {"__OC"}, ClasifDin, {"__OC"}, "C", JoinKind.LeftOuter), "C", {"Clasificador OC"}),
         {{"Clasificador OC", each if _ = null then "(sin clasificador)" else _, type text}})),
     OCsValidas = List.Buffer(DimOCCompleta[__OC]),
+    SetOCsValidas = FnConjunto(OCsValidas),
 
     CCProyecto = FnModaTxt(ConTeorico[Centro de Costos]),
     MapaCCOC = Record.FromList(DimOCCompleta[CC OC], DimOCCompleta[__OC]),
@@ -583,7 +592,7 @@ let
 
     FactVacia = #table(type table [OC = text, NIT = text, Factura = text, Valor = number, FacturaClave = text], {}),
     FactTodas = Table.Buffer(try SINCO_FACTURAS otherwise FactVacia),
-    FactSinco = Table.SelectRows(FactTodas, each [OC] <> "" and List.Contains(OCsValidas, [OC])),
+    FactSinco = Table.SelectRows(FactTodas, each [OC] <> "" and FnEnConjunto(SetOCsValidas, [OC])),
     MapaFactOC = let
             t = Table.SelectRows(Table.AddColumn(FactTodas, "__K", each FnNITDin([NIT]) & "|" & [FacturaClave], type text), each [FacturaClave] <> ""),
             g = Table.Group(t, {"__K"}, {{"OC", each List.Mode([OC]), type text}})
@@ -597,7 +606,7 @@ let
     FacturadoOC = Table.Group(PorFactura, {"OC"}, {{"__Fact", each List.Sum([Invertido factura]), type number}}),
     SaldoDin = Table.SelectRows(Table.AddColumn(
         Table.ExpandTableColumn(Table.NestedJoin(
-            Table.SelectRows(InvertidoOC, each List.Contains(OCsValidas, [__OC])), {"__OC"}, FacturadoOC, {"OC"}, "F", JoinKind.LeftOuter), "F", {"__Fact"}),
+            Table.SelectRows(InvertidoOC, each FnEnConjunto(SetOCsValidas, [__OC])), {"__OC"}, FacturadoOC, {"OC"}, "F", JoinKind.LeftOuter), "F", {"__Fact"}),
         "__Dif", each [__Inv] - (if [__Fact] = null then 0 else [__Fact]), type number), each Number.Abs([__Dif]) >= 1),
     FilasFacturaBase = Table.Combine({
         Table.SelectColumns(Table.SelectRows(PorFactura, each [FacturaClave] <> ""), {"OC", "Factura", "Invertido factura"}),
@@ -619,10 +628,10 @@ let
             let
                 clave = FnFacturaDin([No_Factura]),
                 ocS = if clave = "" then null else Record.FieldOrDefault(MapaFactOC, FnNITDin([NIT]) & "|" & clave, null),
-                oc = if List.Contains(OCsValidas, [__OC]) then [__OC] else if ocS <> null and List.Contains(OCsValidas, ocS) then ocS else null
+                oc = if FnEnConjunto(SetOCsValidas, [__OC]) then [__OC] else if ocS <> null and FnEnConjunto(SetOCsValidas, ocS) then ocS else null
             in [O = oc, F = if clave = "" then "(sin factura)"
                     else Record.FieldOrDefault(TextoFactura, (if oc = null then "" else oc) & "|" & clave, FnTextoODef([No_Factura]))]
-        else [O = if List.Contains(OCsValidas, [__OC]) then [__OC] else null, F = "(sin factura)"]),
+        else [O = if FnEnConjunto(SetOCsValidas, [__OC]) then [__OC] else null, F = "(sin factura)"]),
     Ubicadas = Table.Buffer(Table.AddColumn(Table.AddColumn(
         Table.RemoveColumns(ConUbicacion, {"OC", "Factura"}, MissingField.Ignore),
         "OC", each [__U][O], type text), "Factura", each if [__U][O] = null then null else [__U][F], type text)),
@@ -641,20 +650,24 @@ let
     ConProvTxt = Table.AddColumn(Table.RenameColumns(ConSinProv, {{"No_Prov OC", "__NP"}}), "No_Prov OC", each
         if [OC] = null then null else if [__NP] = null then "(sin provision)" else [__NP], type text),
 
-    ConSeg = Table.AddColumn(Table.AddColumn(ConProvTxt,
+    ConSeg__ = Table.AddColumn(Table.AddColumn(ConProvTxt,
         "No_Prov seg", each if [Tipo] = "PROVISIONES" and [OC] <> null and FnTieneTexto([No_Prov]) then Text.From(try Int64.From(Number.From([No_Prov])) otherwise [No_Prov])
             else if [No_Prov OC] = "(sin provision)" then "(sin provision)" else "(otros registros)", type text),
         "Fila real", each if [Tipo] = "PROVISIONES" and [OC] <> null and FnTieneTexto([No_Prov]) then null else 1, Int64.Type),
-    ValoresOC = Table.Group(Table.SelectRows(ConSeg, each [OC] <> null), {"OC"}, {
+    ConSeg = Table.Buffer(ConSeg__),  // varios consumidores: se calcula una sola vez
+    ValoresOC__ = Table.Group(Table.SelectRows(ConSeg, each [OC] <> null), {"OC"}, {
         {"Aseg prov", each List.Sum([VT Asegurada]), type number},
         {"Comp prov", each List.Sum([VR total aprobacion]), type number},
         {"Inv prov", each List.Sum([Invertido factura]), type number},
         {"Desc prov", each List.Sum([Valor descuento]), type number}}),
-    ParesOCProv = Table.Distinct(Table.SelectColumns(Table.SelectRows(ConSeg, each [Fila real] = null),
+    ValoresOC = Table.Buffer(ValoresOC__),  // varios consumidores: se calcula una sola vez
+    ParesOCProv__ = Table.Distinct(Table.SelectColumns(Table.SelectRows(ConSeg, each [Fila real] = null),
         {"OC", "No_Prov seg", "Tipo OC", "CC OC", "Contratista OC", "Clasificador OC"})),
+    ParesOCProv = Table.Buffer(ParesOCProv__),  // varios consumidores: se calcula una sola vez
     FilasProvOC = Table.ExpandTableColumn(Table.NestedJoin(ParesOCProv, {"OC"}, ValoresOC, {"OC"}, "V", JoinKind.LeftOuter), "V", {"Aseg prov", "Comp prov", "Inv prov", "Desc prov"}),
 
-    InvPorFactura = Table.Group(Table.SelectRows(ConSeg, each [Tipo] = "FACTURA" and [Factura] <> "(sin factura)"), {"OC", "Factura"}, {{"Inv prov", each List.Sum([Invertido factura]), type number}}),
+    InvPorFactura__ = Table.Group(Table.SelectRows(ConSeg, each [Tipo] = "FACTURA" and [Factura] <> "(sin factura)"), {"OC", "Factura"}, {{"Inv prov", each List.Sum([Invertido factura]), type number}}),
+    InvPorFactura = Table.Buffer(InvPorFactura__),  // varios consumidores: se calcula una sola vez
 
     SumaFactOC = Table.Buffer(Table.Group(InvPorFactura, {"OC"}, {{"__S", each List.Sum([Inv prov]), type number}})),
     ValoresOCB = Table.Buffer(ValoresOC),
@@ -666,16 +679,18 @@ let
         in if v = null or s = null or v <= 0 or s <= 0 then 0 else List.Min({1, v / s}),
     FnNz = (n as nullable number) as number => if n = null then 0 else n,
     FilasProvFact0 = Table.ExpandTableColumn(Table.NestedJoin(ParesOCProv, {"OC"}, InvPorFactura, {"OC"}, "V", JoinKind.Inner), "V", {"Factura", "Inv prov"}),
-    FilasProvFact = Table.AddColumn(Table.AddColumn(FilasProvFact0,
+    FilasProvFact__ = Table.AddColumn(Table.AddColumn(FilasProvFact0,
         "Aseg prov", each FnNz([Inv prov]) * FnFactorOC(MapaAseg, [OC]), type number),
         "Comp prov", each FnNz([Inv prov]) * FnFactorOC(MapaComp, [OC]), type number),
+    FilasProvFact = Table.Buffer(FilasProvFact__),  // varios consumidores: se calcula una sola vez
     RepartidoProv = Table.Group(FilasProvFact, {"OC", "No_Prov seg"}, {
         {"__Rep", each List.Sum([Inv prov]), type number}, {"__RepA", each List.Sum([Aseg prov]), type number}, {"__RepC", each List.Sum([Comp prov]), type number}}),
     FnResta = (tabla as table, col as text, rep as text) as table =>
         Table.ReplaceValue(tabla, each Record.Field(_, col), each FnNz(Record.Field(_, col)) - FnNz(Record.Field(_, rep)), Replacer.ReplaceValue, {col}),
-    FilasProvResto = Table.RemoveColumns(FnResta(FnResta(FnResta(
+    FilasProvResto__ = Table.RemoveColumns(FnResta(FnResta(FnResta(
         Table.ExpandTableColumn(Table.NestedJoin(FilasProvOC, {"OC", "No_Prov seg"}, RepartidoProv, {"OC", "No_Prov seg"}, "R", JoinKind.LeftOuter), "R", {"__Rep", "__RepA", "__RepC"}),
         "Inv prov", "__Rep"), "Aseg prov", "__RepA"), "Comp prov", "__RepC"), {"__Rep", "__RepA", "__RepC"}),
+    FilasProvResto = Table.Buffer(FilasProvResto__),  // varios consumidores: se calcula una sola vez
 
     FnClavePar = (oc as text, prov as text) as text => oc & "|" & prov,
     PrimeraParT = Table.Buffer(Table.Group(FilasProvFact, {"OC", "No_Prov seg"}, {{"__F", each List.Min([Factura]), type text}})),
