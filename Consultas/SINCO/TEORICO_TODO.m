@@ -25,6 +25,11 @@ let
         let f = List.Select(Cat, each Txt([Familia]) = fam and Txt([Categoria]) = "Referencia"
                 and Text.StartsWith(Norm([Tipo]), Norm(tipo)) and Norm([Parametro]) = Norm(par))
         in if List.IsEmpty(f) then "" else Txt(f{0}[Ins]),
+    // Factor de conversion de la referencia (p. ej. mortero de piso m3 -> BUL); sin Valor = 1.
+    FactorCat = (fam as text, tipo as text, par as text) as number =>
+        let f = List.Select(Cat, each Txt([Familia]) = fam and Txt([Categoria]) = "Referencia"
+                and Text.StartsWith(Norm([Tipo]), Norm(tipo)) and Norm([Parametro]) = Norm(par))
+        in if List.IsEmpty(f) or Num(f{0}[Valor]) = 0 then 1 else Num(f{0}[Valor]),
 
     Filas = List.Buffer(Table.ToRows(Libro{[Name = "MEMORIA_BLOQUES"]}[Content])),
     Titulos = Filas{3},
@@ -79,7 +84,7 @@ let
             if nom = "" then {} else Repartir(nom,
             (if qE = 0 then {} else {base & [TipoElemento = "Enchape", Ins = if iE = "" then SinIns(rE) else iE, CantUnidad = qE]})
             & (if qE = 0 then {} else List.Transform(Consumos, each base & [TipoElemento = Txt([Parametro]), Ins = Txt([Ins]), CantUnidad = qE * Num([Valor])]))
-            & (if qM = 0 then {} else {base & [TipoElemento = "Mortero de piso", Ins = if iM = "" then SinIns(rM) else iM, CantUnidad = qM]})),
+            & (if qM = 0 then {} else {base & [TipoElemento = "Mortero de piso", Ins = if iM = "" then SinIns(rM) else iM, CantUnidad = qM * FactorCat("Enchape", "Mortero piso", rM)]})),
     TodasEnchapes = List.Combine(List.Transform(Ench, FilaE)),
 
     Tipo = type table [Material = text, Tipologia = text, NumUnidades = number, #"Centro de Costos" = text, TipoElemento = text, Piso = text, Ins = text, CantUnidad = number],

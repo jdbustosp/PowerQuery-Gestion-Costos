@@ -1,5 +1,6 @@
 // Teorico de mamposteria: de MEM_MAMPOSTERIA (formato de Juan, por tramo) a una fila por insumo.
-// Unidades e hilada parada -> Ins del material; morteros (m3) x consumo de CAT_TECNICO segun Tipo pega / Tipo grout.
+// Unidades e hilada parada -> Ins del material; morteros (m3) x consumo de CAT_TECNICO segun Tipo pega / Tipo pañete / Tipo grout
+// (el valor elegido = Parametro del consumo: nombre del mortero seco o HECHO EN OBRA).
 // Grafil y Hierro son adicionales a la memoria de acero. Unidades y CC: ASIGNACION. M local del libro.
 let
     Txt = (v as any) as text => let t = try Text.Trim(Text.From(v)) otherwise null in if t = null then "" else t,
@@ -31,7 +32,7 @@ let
         {"Unidades", "Piezas est.", 1, null, "M"},
         {"Hilada parada", "Hilada parada (und)", 1, null, "M"},
         {"Pega", "Pega (m³)", 1, "Tipo pega", "Pega"},
-        {"Pañete", "Mortero pañete (m³)", 1, "Tipo pega", "Pañete"},
+        {"Pañete", "Mortero pañete (m³)", 1, "Tipo pañete", "Pañete"},
         {"Grout dovelas", "Grouting (m³)", 1, "Tipo grout", "Grout"},
         {"Viga canchada", "Vigas (ml)", SecViga, "Tipo pega", "Viga canchada"},
         {"Cinta", "Cinta ventana (ml)", SecCinta, "Tipo pega", "Cinta"},
@@ -54,8 +55,10 @@ let
                         let ins = if c{4} = "M" then InsDe("Material", mat) else InsDe("Refuerzo", c{4})
                         in if ins = "" then {} else {base & [Ins = ins, CantUnidad = q]}
                     else
-                        let mortero = Txt(Record.FieldOrDefault(r, c{3}, null)),
-                            usa = List.Select(Consumos, each Txt([Tipo]) = c{4} and Txt([Parametro]) = mortero)
+                        // Tipo pañete vacio o sin columna (libros anteriores) -> usa Tipo pega
+                        let elegido = Txt(Record.FieldOrDefault(r, c{3}, null)),
+                            mortero = if elegido = "" and c{3} = "Tipo pañete" then Txt(Record.FieldOrDefault(r, "Tipo pega", null)) else elegido,
+                            usa = List.Select(Consumos, each Txt([Tipo]) = c{4} and Norm([Parametro]) = Norm(mortero))
                         in List.Transform(usa, each base & [Ins = Txt([Ins]), CantUnidad = q * Num([Valor])])))),
     Registros = List.Combine(List.Transform(Table.ToRecords(Mem), Fila)),
     Tabla = Table.FromRecords(Registros, type table [Material = text, Tipologia = text, NumUnidades = number,
