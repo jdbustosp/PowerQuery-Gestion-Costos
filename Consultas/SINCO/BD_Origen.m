@@ -772,9 +772,53 @@ let
         if [Tipo] = "CC" and List.Contains({"Contrato", "Orden de compra"}, [Tipo OC]) then ToNumber0([#"VR total aprobacion"]) else 0, type number),
     ConComparativoAseg0 = Table.AddColumn(ConValorClasificado, "__ComparativoAseg", each
         if [__AsegComparativo] <> null then [__AsegComparativo] else [#"# CC - Comparativo"], type text),
-    ConComparativoAseg = Table.RenameColumns(
-        Table.RemoveColumns(ConComparativoAseg0, {"# CC - Comparativo"}), {{"__ComparativoAseg", "# CC - Comparativo"}}),
-    ConCantidadAsegSINCO = Table.AddColumn(ConComparativoAseg, "Cantidad asegurada SINCO", each
+    ConComparativoAseg = Table.Buffer(Table.RenameColumns(
+        Table.RemoveColumns(ConComparativoAseg0, {"# CC - Comparativo"}), {{"__ComparativoAseg", "# CC - Comparativo"}})),
+
+    // Un mismo numero de comparativo (CC de la fila + numero, con sufijo de otrosi) debe mostrar
+    // un solo nombre. Maestro = el nombre unico que trae SINCO en filas CC (Det_CC); si no hay,
+    // el unico de CC CONSOLIDADO. Aprobaciones (ADJUDICADO) nunca manda. Solo se reemplaza si la
+    // primera palabra coincide, para no unir comparativos distintos que comparten numero.
+    FnEsNumTxt = (t as nullable text) as logical => t <> null and t <> "" and Text.Remove(t, {"0".."9"}) = "",
+    FnPartesComp = (s as text) as nullable record =>
+        let
+            p = Text.Split(s, "-"),
+            ok = List.Count(p) >= 3 and FnEsNumTxt(p{0}) and FnEsNumTxt(p{1}),
+            resto = if ok then Text.AfterDelimiter(s, "-", 1) else null,
+            t = if ok then Text.BeforeDelimiter(resto, "-") else null,
+            suf = if not ok then null
+                  else if FnEsNumTxt(t) then t
+                  else if t <> "" and FnEsNumTxt(Text.Start(t, 1)) and Text.Contains(resto, ")-")
+                       and Text.Contains(Text.BeforeDelimiter(resto, ")-"), "(") then Text.BeforeDelimiter(resto, ")-") & ")"
+                  else null,
+            nombre = if not ok then null else if suf = null then resto else Text.Middle(resto, Text.Length(suf) + 1)
+        in if not ok then null else
+            [Num = p{0} & "-" & Text.From(Number.From(p{1})) & (if suf = null then "" else "-" & suf),
+             Palabra = Text.Upper(Text.BeforeDelimiter(Text.Trim(nombre) & " ", " "))],
+    MemoPartesComp =
+        let k = List.Select(List.Distinct(ConComparativoAseg[#"# CC - Comparativo"]), each _ is text and _ <> "")
+        in Record.FromList(List.Transform(k, FnPartesComp), k),
+    FnParteComp = (s as any, campo as text) as nullable text =>
+        let r = if s is text and Record.HasFields(MemoPartesComp, s) then Record.Field(MemoPartesComp, s) else null
+        in if r = null then null else Record.Field(r, campo),
+    ConNumComp = Table.AddColumn(ConComparativoAseg, "__NumComp", each
+        let n = FnParteComp([#"# CC - Comparativo"], "Num")
+        in if n = null then null else FnClaveMaestro([Centro de Costos]) & "|" & n, type text),
+    FilasNumCC    = Table.SelectRows(ConNumComp, each [Tipo] = "CC" and [__NumComp] <> null),
+    ClavesCompCC  = let k = List.Distinct(FilasNumCC[__NumComp]) in Record.FromList(k, k),
+    NombreCompCC  = FnMapaUnico(FilasNumCC, each [__NumComp], "# CC - Comparativo"),
+    NombreCompCon = FnMapaUnico(Table.SelectRows(ConNumComp, each [Tipo] = "CC CONSOLIDADO"), each [__NumComp], "# CC - Comparativo"),
+    // Si SINCO (filas CC) tiene la clave con varios nombres, no se unifica (no se usa CC CONSOLIDADO).
+    FnCompUnificado = (k as nullable text, actual as any) as any =>
+        let m = if k = null then null
+                else if Record.HasFields(ClavesCompCC, k) then Record.FieldOrDefault(NombreCompCC, k, null)
+                else Record.FieldOrDefault(NombreCompCon, k, null)
+        in if m = null or m = actual then actual
+           else if FnParteComp(m, "Palabra") = FnParteComp(actual, "Palabra") then m else actual,
+    ConCompUnificado0 = Table.AddColumn(ConNumComp, "__CompUnificado", each FnCompUnificado([__NumComp], [#"# CC - Comparativo"]), type text),
+    ConCompUnificado = Table.RenameColumns(
+        Table.RemoveColumns(ConCompUnificado0, {"# CC - Comparativo", "__NumComp"}), {{"__CompUnificado", "# CC - Comparativo"}}),
+    ConCantidadAsegSINCO = Table.AddColumn(ConCompUnificado, "Cantidad asegurada SINCO", each
         if [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS" then ToNumber0([Cantidad asegurada]) else 0, type number),
     ConValorAsegSINCO = Table.AddColumn(ConCantidadAsegSINCO, "VT asegurado SINCO", each
         if [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS" then ToNumber0([VT Asegurada]) else 0, type number),
