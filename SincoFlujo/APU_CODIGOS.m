@@ -8,6 +8,13 @@
 // Existe para que ACTIVIDADES_NUEVAS (que solo necesita saber "¿que codigos
 // hay en el APU?") no tenga que evaluar toda esa cadena pesada en cada
 // actualizacion.
+//
+// Solo devuelve los codigos que PLANTILLA_PPTO_SINCO crea en SINCO: una
+// actividad con cantidad 0 en TODAS sus ocurrencias del APU se quita de la
+// plantilla (paso 10), asi que no queda en el EDT; si aqui siguiera, la
+// actividad tampoco saldria en ACTIVIDADES_NUEVAS y el flujo fallaria con
+// "NO ESTA EL ITEM" (2026-11-18). Cantidad vacia o ilegible = se conserva,
+// igual que en la plantilla.
 let
     // Un mismo archivo SINCO FLUJO sirve para cualquier proyecto: si el
     // Origen es ORACLE este dominio aun no tiene equivalente implementado,
@@ -34,7 +41,7 @@ let
                     Timeout = #duration(0, 0, 5, 0)
                 ])),
                 TextoHTML = Text.FromBinary(Binario, 65001),
-                Columnas = {{"Columna1", "td:nth-child(1), th:nth-child(1)"}},
+                Columnas = {{"Columna1", "td:nth-child(1), th:nth-child(1)"}, {"Columna4", "td:nth-child(4), th:nth-child(4)"}},
                 Tabla = Html.Table(TextoHTML, Columnas, [RowSelector="tr"]),
 
                 EsCodigoActividad = (c0 as text) as logical =>
@@ -56,7 +63,11 @@ let
                     in
                         if antes <> "" and EsCodigoActividad(antes) then antes else null,
                 type text),
-                SoloCodigos = Table.SelectRows(ConCodigo, each [Codigo] <> null),
+                // Misma lectura de cantidad que PLANTILLA_PPTO_SINCO (columna 4, en-US y luego es-ES).
+                ConCant = Table.AddColumn(ConCodigo, "Cantidad", each
+                    let s = if [Columna4] = null then "" else Text.Trim(Text.Replace(Text.Replace(Text.Replace(Text.From([Columna4]), "#(lf)", " "), "#(cr)", " "), "#(00A0)", " "))
+                    in try Number.FromText(s, "en-US") otherwise try Number.FromText(s, "es-ES") otherwise null),
+                SoloCodigos = Table.SelectRows(ConCant, each [Codigo] <> null and [Cantidad] <> 0),
                 Distintos = Table.Distinct(Table.SelectColumns(SoloCodigos, {"Codigo"}))
             in
                 Distintos
