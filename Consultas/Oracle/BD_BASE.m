@@ -126,9 +126,25 @@ let
             Table.SelectColumns(Excel.CurrentWorkbook(){[Name = "MaestroInsumos"]}[Content], {"Ins", "Clasificador"}),
             each FnTieneTexto([Clasificador]) and FnClaveMaestro([Ins]) <> "")
         otherwise #table({"Ins", "Clasificador"}, {}),
-    ClasifMaestro = FnMapaModa(
-        Table.TransformColumns(MaestroFilas, {{"Clasificador", each Text.Trim(Text.From(_)), type text}}),
-        each FnClaveMaestro([Ins]), "Clasificador"),
+    // 2026-11-18: BD muestra el Ins sin el codigo del articulo ("Z410300-0076 - ACERO (KG)" -> "ACERO (KG)") y el
+    // maestro se llena desde ese nombre. La llave quita el codigo en los dos lados (sirve con o sin codigo) y,
+    // si no aparece, se prueba sin la unidad final (el Ins de BD_BASE aun no trae la UM en todos los casos).
+    FnSinCodigoArt = (v as any) as text =>
+        let
+            t = FnTextoODef(v),
+            p = if Text.Contains(t, " - ") then Text.BeforeDelimiter(t, " - ") else "",
+            s = Text.Split(p, "-"),
+            esArt = List.Count(s) = 2 and Text.Length(s{0}) > 0 and Text.Length(s{1}) > 0
+                and Text.Select(s{1}, {"0".."9"}) = s{1} and not Text.Contains(s{0}, " ")
+        in if esArt then Text.AfterDelimiter(t, " - ") else t,
+    FnSinUM = (t as text) as text =>
+        if Text.EndsWith(t, ")") and Text.Contains(t, " (") then Text.Trim(Text.BeforeDelimiter(t, " (", {0, RelativePosition.FromEnd})) else t,
+    MaestroLimpio = Table.TransformColumns(MaestroFilas, {{"Clasificador", each Text.Trim(Text.From(_)), type text}}),
+    ClasifMaestroIns = FnMapaModa(MaestroLimpio, each FnClaveMaestro(FnSinCodigoArt([Ins])), "Clasificador"),
+    ClasifMaestroSinUM = FnMapaModa(MaestroLimpio, each FnClaveMaestro(FnSinUM(FnSinCodigoArt([Ins]))), "Clasificador"),
+    FnMaestro = (ins as any) as nullable text =>
+        let n = FnSinCodigoArt(ins), m = FnBuscar(ClasifMaestroIns, FnClaveMaestro(n))
+        in if m <> null then m else FnBuscar(ClasifMaestroSinUM, FnClaveMaestro(FnSinUM(n))),
     FnBuscar = (rec as record, key as nullable text) as any =>
         if key = null or key = "" then null else Record.FieldOrDefault(rec, key, null),
     FnTieneTexto = (v as any) as logical =>
@@ -183,7 +199,7 @@ let
             d3 = if d2 <> null then d2 else FnBuscar(ClasifDetOC, ocK)
         in d3, type text),
     Etapa1 = Table.AddColumn(Etapa0, "__ClasifFinal", each
-        let m0 = FnBuscar(ClasifMaestro, FnClaveMaestro([Ins]))
+        let m0 = FnMaestro([Ins])
         in if List.Contains({"CC CONSOLIDADO", "PROVISIONES"}, [Tipo]) then (if FnTieneTexto([Clasificador]) then Text.Trim(Text.From([Clasificador])) else "zOtros")
            else if List.Contains({"CC", "ADJUDICADO"}, [Tipo]) then
                (let a = FnBuscar(ClasifAprobComp, FnClaveComp(_)) in if a <> null then a else "zOtros")
@@ -343,11 +359,44 @@ let
             proj = if usarIns then FnBuscar(ProjSincoIns, kI) else FnBuscar(ProjSincoAct, kA)
         in proj <> null and ppto <> null and ppto > 0 and Number.Abs(proj) < 1,
     // ORACLE: regla del usuario para Oracle = TODO el asegurado + saldo real POR ADJUDICAR (DISPONIBLE ya
-    // descuenta lo descargado; un contrato parcial no elimina el saldo). ADJUDICADO no se suma otra vez.
+    // descuenta lo descargado; un contrato parcial no elimina el saldo).
+    // 2026-11-18 (regla del usuario): se descargan etapas completas antes de contratarlas, asi que
+    //  - ADJUDICADO proyecta el saldo de su comparativo = max(0, descargado - asegurado de las OC/contratos
+    //    del comparativo), repartido entre sus filas en proporcion a su valor.
+    //  - En una actividad SIN descargas, POR ADJUDICAR proyecta max(0, por adjudicar - asegurado de la
+    //    actividad), repartido igual (evita sumar dos veces lo contratado sin comparativo).
     // Se aplica aqui (no al final) para que los adicionales y las columnas que salen despues la usen.
+    FnClaveCompP = (r as record) as text => FnTextoODef(r[#"# CC - Comparativo"]),
+    FilasAdj = Table.SelectRows(AddVUAseg, each [Tipo] = "ADJUDICADO"),
+    DescPorComp = Table.Group(Table.AddColumn(FilasAdj, "__C", FnClaveCompP, type text), {"__C"},
+        {{"__D", each List.Sum(List.Transform([#"Valor Total ppto (CC)"], ToNumber0)), type number}}),
+    AsegPorOC = Table.Group(Table.AddColumn(Table.SelectRows(AddVUAseg, each [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS"),
+            "__O", each FnOCKey([#"# OC / Contrato"]), type text), {"__O"},
+        {{"__A", each List.Sum(List.Transform([VT Asegurada], ToNumber0)), type number}}),
+    MapaAsegOC = Record.FromList(AsegPorOC[__A], AsegPorOC[__O]),
+    OCsDeComp = Table.Group(Table.Distinct(Table.SelectColumns(Table.AddColumn(Table.AddColumn(
+            Table.SelectRows(AddVUAseg, each [Tipo] = "CC"), "__C", FnClaveCompP, type text),
+            "__O", each FnOCKey([#"# OC / Contrato"]), type text), {"__C", "__O"})), {"__C"},
+        {{"__A", each List.Sum(List.Transform(List.Select([__O], each _ <> ""), (o) => ToNumber0(Record.FieldOrDefault(MapaAsegOC, o, 0)))), type number}}),
+    MapaAsegComp = Record.FromList(OCsDeComp[__A], OCsDeComp[__C]),
+    MapaFactorComp = Record.FromList(
+        List.Transform(Table.ToRecords(DescPorComp), (r) =>
+            if r[__D] <= 0 then 0 else List.Max({0, r[__D] - ToNumber0(Record.FieldOrDefault(MapaAsegComp, r[__C], 0))}) / r[__D]),
+        DescPorComp[__C]),
+    ActConDescarga = List.Buffer(List.Distinct(List.RemoveNulls(List.Transform(Table.ToRecords(FilasAdj), FnClaveAct)))),
+    PorAdjAct = FnSumaPor("POR ADJUDICAR", "Valor Total ppto (CC)", FnClaveAct),
+    FnFactorPorAdj = (r as record) as number =>
+        let
+            k = FnClaveAct(r),
+            pa = if k = null then null else FnBuscar(PorAdjAct, k),
+            aseg = ToNumber0(r[vtAsegAct])
+        in if k = null or List.Contains(ActConDescarga, k) or pa = null or pa <= 0 then 1
+           else List.Max({0, pa - aseg}) / pa,
     AplicarProyeccion = Table.AddColumn(ConAsegActividad, "VT Proyectado Colsubsidio", each
         if [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS" then (if ToNumber0([VT Asegurada]) <> 0 then [VT Asegurada] else null)
-        else if [Tipo] = "POR ADJUDICAR" then [#"Valor Total ppto (CC)"]
+        else if [Tipo] = "POR ADJUDICAR" then ToNumber0([#"Valor Total ppto (CC)"]) * FnFactorPorAdj(_)
+        else if [Tipo] = "ADJUDICADO" then
+            ToNumber0([#"Valor Total ppto (CC)"]) * ToNumber0(Record.FieldOrDefault(MapaFactorComp, FnClaveCompP(_), 0))
         else null,
     type number),
     AplicarProyeccionTurpial = Table.AddColumn(ConAsegActividad, "VT Proyectado Colsubsidio", each
@@ -648,7 +697,7 @@ let
         "Tipo", each "TEORICO", type text),
         "# CC - Comparativo", each "SIN CUADRO COMPARATIVO", type text),
         "Clasificador", each
-            let k = FnClaveMaestro([Ins]), m = FnBuscar(ClasifMaestro, k), s = FnBuscar(ClasifSalidas, k)
+            let k = FnClaveMaestro([Ins]), m = FnMaestro([Ins]), s = FnBuscar(ClasifSalidas, k)
             in if m <> null then m
                else if [Material] <> "MAMPOSTERIA" then Text.Proper([Material])
                else if s <> null then s else "Mamposteria", type text),

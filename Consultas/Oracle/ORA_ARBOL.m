@@ -9,8 +9,9 @@
 // Niveles de una actividad = sus ancestros que existen en el arbol, poniendo en ceros sus
 // segmentos finales (misma regla que PLANTILLA_PPTO_ORACLE de SINCO-SINCO). Nombres de nodo:
 // PRESUPUESTOS y, si falta, el Cost Sheet (CONTROL.xlsx).
-// Campos: Actividades (CBS, nombre, UM, Nivel 1..4, Capitulo), Insumos (filas de ppto),
-//         Nombres (record codigo -> nombre), FnActividad, FnNiveles, FnIns.
+// Campos: Actividades (CBS, nombre, UM, Nivel 1..N), Insumos (filas de ppto),
+//         Nombres (record codigo -> nombre), FnActividad, FnNiveles, NombresNivel (N = nivel mas
+//         profundo del arbol, minimo 4), FnIns.
 let
     Fuentes = ORA_FUENTES,
     FnNum = Fuentes[FnNum],
@@ -66,12 +67,17 @@ let
                 Text.Combine(List.Transform({0..n - 1}, (i) => if i >= k then Text.Repeat("0", Text.Length(s{i})) else s{i}), "-"),
             cands = List.Transform(List.Sort(noCero), EnCeros)
         in List.Select(cands, (a) => a <> cod and FnNombre(a) <> null),
+    // Numero de niveles = el mas profundo del arbol (minimo 4, para no quitar campos a las dinamicas).
+    // Un nodo con k ancestros deja a sus actividades con k + 1 niveles.
+    MaxNiveles = List.Max({4}
+        & List.Transform(TodosNodos[Cod], (c) => List.Count(FnAncestros(c)) + 1)
+        & List.Transform(List.Distinct(List.Select(Utiles[Cod], (c) => EsCBS(c))),(c) => List.Count(FnAncestros(c)))),
+    NombresNivel = List.Transform({1..MaxNiveles}, (i) => "Nivel " & Text.From(i)),
     FnNiveles = (cod as nullable text) as record =>
         let
             anc = if cod = null or cod = "" or not EsCBS(cod) then {} else FnAncestros(cod),
-            txt = List.Transform(anc, (a) => a & " - " & FnNombre(a)),
-            n = (i as number) => if List.Count(txt) > i then txt{i} else null
-        in [#"Nivel 1" = n(0), #"Nivel 2" = n(1), #"Nivel 3" = n(2), #"Nivel 4" = n(3)],
+            txt = List.Transform(anc, (a) => a & " - " & FnNombre(a))
+        in Record.FromList(List.Transform({0..MaxNiveles - 1}, (i) => if List.Count(txt) > i then txt{i} else null), NombresNivel),
 
     // ---------- actividades ----------
     ActPpto = Table.Buffer(Table.Group(Table.SelectRows(Utiles, each [Clase] = "ACTIVIDAD"), {"Cod"}, {
@@ -116,6 +122,7 @@ let
         Insumos = Insumos,
         Nombres = Nombres,
         FnNiveles = FnNiveles,
+        NombresNivel = NombresNivel,
         FnActividad = FnActividadDe,
         FnIns = FnInsOficial,
         Limpiar = Limpiar,
