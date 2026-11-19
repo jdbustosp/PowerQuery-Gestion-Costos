@@ -87,14 +87,21 @@ let
         List.Transform(Fact, each {NormNombre(Campo(_, "Columna4")), Limpiar(Campo(_, "Columna3"))}) &
         List.Transform(Pagos, each {NormNombre(Campo(_, "Columna3")), Limpiar(Campo(_, "Columna4"))})), each [Clave] <> ""), {"Clave"}),
     MapaNitNombre = Record.FromList(NitNombre[NIT], List.Transform(NitNombre[Clave], each "k" & _)),
+    // Respaldo: NIT por nombre y salidas con contratista "-" desde PROVEEDORES (SincoFlujo\TERCEROS_NIT)
+    TercerosNit = FxGitHub("TERCEROS_NIT"),
 
     // ===== 3. Una fila por linea, ordenadas por salida de origen y linea =====
     Ordenado = if Table.RowCount(ConCantidad) = 0 then ConCantidad else Table.Sort(ConCantidad, {{"Salida origen", Order.Ascending}, {"__I", Order.Ascending}}),
     Nuevo = if Table.RowCount(Ordenado) = 0 then #table(ColsBase & ColsProv, {}) else
         Table.FromRecords(Table.TransformRows(Ordenado, (r) =>
-            Record.SelectFields(r, ColsBase) & [
-            #"NIT contratista" = if r[Contratista] = "" then null else Record.FieldOrDefault(MapaNitNombre, "k" & NormNombre(r[Contratista]), null),
-            #"Nombre contratista" = r[Contratista]
+            let
+                sinNombre = r[Contratista] = null or Text.Trim(Text.From(r[Contratista])) = "" or Text.Trim(Text.From(r[Contratista])) = "-",
+                manual = if sinNombre then TercerosNit[SalidaSin](r[Salida origen]) else null,
+                porNombre = if sinNombre then null else Record.FieldOrDefault(MapaNitNombre, "k" & NormNombre(r[Contratista]), null)
+            in Record.SelectFields(r, ColsBase) & [
+            #"NIT contratista" = if manual <> null then manual[NIT] else if sinNombre then null
+                else if porNombre <> null then porNombre else TercerosNit[PorNombre](r[Contratista]),
+            #"Nombre contratista" = if manual <> null and manual[Nombre] <> "" then manual[Nombre] else r[Contratista]
         ])),
 
     // ===== 4. Conservar lo que escribio el flujo; SALIDA SINCO comun a la salida de origen =====

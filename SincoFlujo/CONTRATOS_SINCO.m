@@ -358,7 +358,11 @@ let
     MapaNitNombre = Record.FromList(NitPorNombre[NIT], List.Transform(NitPorNombre[Clave], each "k" & _)),
     FnNitContratista = (contrato as any, nombre as any) as nullable text =>
         let porContrato = Record.FieldOrDefault(MapaNitContrato, "k" & FnTxtCelda(contrato), null)
-        in if porContrato <> null then porContrato else Record.FieldOrDefault(MapaNitNombre, "k" & FnNormNombre(nombre), null),
+        in if porContrato <> null then porContrato else
+            let porNombre = Record.FieldOrDefault(MapaNitNombre, "k" & FnNormNombre(nombre), null)
+            in if porNombre <> null then porNombre else TercerosNit[PorNombre](nombre),
+    // Respaldo: NIT por nombre desde PROVEEDORES (SincoFlujo\TERCEROS_NIT) si los informes del centro no lo traen
+    TercerosNit = FxGitHub("TERCEROS_NIT"),
 
     // ===== 4c. Anticipos positivos por contrato ("Informe relacion de pagos"). Dos formatos segun la
     //          constructora: 27 columnas (Anticipo en la 10) o 31, con SubTotal y A, I, U (Anticipo en la 14) =====

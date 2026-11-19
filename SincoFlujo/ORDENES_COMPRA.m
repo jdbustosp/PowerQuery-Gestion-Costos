@@ -103,11 +103,14 @@ let
         List.Transform(Fact, each {NormNombre(Campo(_, "Columna4")), Limpiar(Campo(_, "Columna3"))}) &
         List.Transform(Pagos, each {NormNombre(Campo(_, "Columna3")), Limpiar(Campo(_, "Columna4"))})), each [Clave] <> ""), {"Clave"}),
     MapaNitNombre = Record.FromList(NitNombre[NIT], List.Transform(NitNombre[Clave], each "k" & _)),
+    // Respaldo: NIT por nombre desde PROVEEDORES (SincoFlujo\TERCEROS_NIT) si los informes del centro no lo traen
+    TercerosNit = FxGitHub("TERCEROS_NIT"),
     FnProveedor = (orden as text) as record =>
         let
             nombre = Record.FieldOrDefault(MapaProv, "k" & orden, null),
             porOrden = Record.FieldOrDefault(MapaNitOrden, "k" & orden, null),
-            nit = if porOrden <> null then porOrden else if nombre = null then null else Record.FieldOrDefault(MapaNitNombre, "k" & NormNombre(nombre), null)
+            porNombre = if nombre = null then null else Record.FieldOrDefault(MapaNitNombre, "k" & NormNombre(nombre), null),
+            nit = if porOrden <> null then porOrden else if porNombre <> null then porNombre else if nombre = null then null else TercerosNit[PorNombre](nombre)
         in [#"NIT proveedor" = nit, #"Nombre proveedor" = nombre],
 
     // ===== 3. Una fila por (orden, insumo) =====
