@@ -41,6 +41,16 @@ let
     AprobadosPorComparativo = IndiceUnico(Aprobados, "__Comp", "Clasificador"),
     AprobadosPorInsumo = IndiceUnico(
         Table.AddColumn(Aprobados, "__Ins", each ConInsumo([__Comp], _), type nullable text), "__Ins", "Clasificador"),
+    // Si el comparativo tiene varios clasificadores y el insumo no cruza por nombre (el consolidado
+    // nombra los insumos distinto a SINCO), se usa el clasificador de mayor valor aprobado del comparativo.
+    ValorAprobado = (r as record) as number =>
+        let n = try Number.From(Record.FieldOrDefault(r, "VT CC cons", 0)) otherwise 0 in if n = null then 0 else n,
+    AprobadosPorComparativoMayor =
+        let
+            g = Table.Group(Table.AddColumn(Table.TransformColumns(Aprobados, {{"Clasificador", each if _ is text then Text.Trim(_) else _, type nullable text}}), "__V", ValorAprobado, type number),
+                {"__Comp", "Clasificador"}, {{"__S", each List.Sum([__V]), type number}}),
+            m = Table.Group(g, {"__Comp"}, {{"__C", each Table.Max(_, "__S")[Clasificador], type text}})
+        in Record.FromList(m[__C], m[__Comp]),
     Manual = try Excel.CurrentWorkbook(){[Name = "MaestroInsumos"]}[Content]
              otherwise #table(type table [Ins = nullable text, Clasificador = nullable text], {}),
     ManualValido = Table.SelectRows(Manual, each ClaveTexto([Ins]) <> "" and CategoriaValida([Clasificador])),
@@ -82,8 +92,9 @@ let
                 comp = ClaveComparativo(r),
                 ins = Buscar(AprobadosPorInsumo, ConInsumo(comp, r)),
                 aprobado = if ins <> null then ins else Buscar(AprobadosPorComparativo, comp),
-                manual = if aprobado <> null then null else Buscar(ManualPorInsumo, ClaveTexto(r[Ins]))
-            in if aprobado <> null then aprobado else if manual <> null then manual else "zOtros",
+                manual = if aprobado <> null then null else Buscar(ManualPorInsumo, ClaveTexto(r[Ins])),
+                mayor = if aprobado <> null or manual <> null then null else Buscar(AprobadosPorComparativoMayor, comp)
+            in if aprobado <> null then aprobado else if manual <> null then manual else if mayor <> null then mayor else "zOtros",
     Resultado = Table.ReplaceValue(ConComparativo, each [Clasificador], each Clasificador(_), Replacer.ReplaceValue, {"Clasificador"})
 in
     Resultado
