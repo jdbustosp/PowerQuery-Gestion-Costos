@@ -406,8 +406,54 @@ let
             ppto = if usarIns then FnBuscar(PptoIns, kI) else FnBuscar(PptoAct, kA),
             proj = if usarIns then FnBuscar(ProjSincoIns, kI) else FnBuscar(ProjSincoAct, kA)
         in proj <> null and ppto <> null and ppto > 0 and Number.Abs(proj) < 1,
+    // POR CONTRATAR (2026-11-23): grupo de comparativos (familia + las que comparten OC). Cerrado -> el ADJUDICADO no
+    // proyecta nada mas; Abierto y visible -> proyecta el saldo (aprobado - asegurado - suelto) segun el ppto.
+    PC = F_Globales[FnPorContratar](AddVUAseg),
+    PCFamilia = PC[Familia],
+    PCPorFam = let x = Table.ExpandListColumn(Table.SelectColumns(PC[Grupos], {"__G", "Familias", "Valor", "Contratado", "Estado", "Mostrar"}), "Familias")
+        in Record.FromList(Table.ToRecords(x), x[Familias]),
+    // Solo aplica en los libros que tienen la tabla POR_CONTRATAR en Comparativos (2026-11-23: Pamplona y Turpial)
+    PCActivo = (try Table.RowCount(Excel.CurrentWorkbook(){[Name = "POR_CONTRATAR"]}[Content]) otherwise null) <> null,
+    FnPCDe = (r as record) as nullable record =>
+        if not PCActivo then null else
+        let f = PCFamilia(r[Centro de Costos], r[#"# CC - Comparativo"]) in if f = null then null else Record.FieldOrDefault(PCPorFam, f, null),
+    PptoAdjPorGrupo = let t = Table.SelectRows(Table.AddColumn(Table.SelectRows(AddVUAseg, each [Tipo] = "ADJUDICADO"), "__G",
+                each let g = FnPCDe(_) in if g = null then null else g[__G], type text), each [__G] <> null),
+            g = Table.Group(t, {"__G"}, {{"__S", each List.Sum(List.Transform([#"Valor Total ppto (CC)"], ToNumber0)), type number}})
+        in Record.FromList(g[__S], g[__G]),
+    FnProyPorContratar = (r as record) as nullable number =>
+        let g = FnPCDe(r) in
+        if g = null then null
+        else if g[Estado] = "Cerrado" then 0
+        // La tabla manda: lo que se ve Abierto se proyecta completo (aunque SINCO tenga la actividad en 0); para no
+        // proyectarlo, ponerlo Cerrado
+        else if g[Mostrar] then
+            (let tot = ToNumber0(Record.FieldOrDefault(PptoAdjPorGrupo, g[__G], 0))
+             in if tot = 0 then 0 else g[Valor] * ToNumber0(r[#"Valor Total ppto (CC)"]) / tot)
+        else null,
+    // Regla A (2026-11-23): insumo con asegurado que nunca paso por comparativo ni descarga (nomina, vigilancia,
+    // aportes...) proyecta max(ppto, asegurado): su POR ADJUDICAR lleva el saldo ppto - asegurado. Si el insumo
+    // tiene filas CC o ADJUDICADO (comparativo o descarga aplicada) sigue las reglas de su comparativo.
+    InsConComparativo = FnConjunto(List.Select(List.Transform(Table.ToRecords(
+        Table.SelectRows(AddVUAseg, each [Tipo] = "CC" or [Tipo] = "ADJUDICADO")), FnClaveIns), each _ <> null)),
+    AsegIns = let t = Table.SelectRows(Table.AddColumn(Table.SelectRows(AddVUAseg, each [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS"),
+                "__K", each FnClaveIns(_), type text), each [__K] <> null),
+            g = Table.Group(t, {"__K"}, {{"__S", each List.Sum(List.Transform([VT Asegurada], ToNumber0)), type number}})
+        in Record.FromList(g[__S], g[__K]),
+    PorAdjIns = FnSumaPor("POR ADJUDICAR", "Valor Total ppto (CC)", FnClaveIns),
+    // Por ahora solo en estos proyectos (pedido de Juan 2026-11-23)
+    ReglaAActiva = let p = try Text.Upper(Text.Trim(ProyectoActual)) otherwise ""
+        in List.AnyTrue(List.Transform({"PAMPLONA 1", "TURPIAL", "GUAYACAN", "VERDE ESPERANZA"}, each Text.Contains(p, _))),
+    FnReglaA = (r as record) as nullable number =>
+        let k = FnClaveIns(r), a = ToNumber0(FnBuscar(AsegIns, k))
+        in if not ReglaAActiva or k = null or a <= 0 or FnEnConjunto(InsConComparativo, k) then null
+           else let p = ToNumber0(FnBuscar(PptoIns, k)), tot = ToNumber0(FnBuscar(PorAdjIns, k))
+                in if tot = 0 then 0 else List.Max({0, p - a}) * ToNumber0(r[#"Valor Total ppto (CC)"]) / tot,
     AplicarProyeccion = Table.AddColumn(ConAsegActividad, "VT Proyectado Colsubsidio", each
-        if [Tipo] = "POR ADJUDICAR" then (if ToNumber0([vtAsegAct]) > 0 or FnSincoEnCero(_) then 0 else [#"Valor Total ppto (CC)"])
+        if [Tipo] = "POR ADJUDICAR" and FnReglaA(_) <> null then (if FnSincoEnCero(_) then 0 else FnReglaA(_))
+        else if [Tipo] = "POR ADJUDICAR" then (if ToNumber0([vtAsegAct]) > 0 or FnSincoEnCero(_) then 0 else [#"Valor Total ppto (CC)"])
+
+        else if [Tipo] = "ADJUDICADO" and FnProyPorContratar(_) <> null then FnProyPorContratar(_)
 
         else if [Tipo] = "ADJUDICADO" and FnBuscar(FactorAprobado, [#"# CC - Comparativo"]) <> null then
             (if FnSincoEnCero(_) then 0 else FnProyAprobado(_))

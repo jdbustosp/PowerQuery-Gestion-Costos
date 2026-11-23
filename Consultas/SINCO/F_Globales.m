@@ -880,7 +880,121 @@ let
                 Expanded = Table.ExpandRecordColumn(AddStd, "Std", ColumnasBase, ColumnasBase),
                 Filtrado = Table.SelectRows(Expanded, each try (Number.FromText([#"Codigo ins"]) <> null) otherwise false),
                 Selected = Table.SelectColumns(Filtrado, ColumnasBase, MissingField.UseNull)
-            in Selected
+            in Selected,
+
+        // POR CONTRATAR (2026-11-23): por familia de comparativo (codigo + otrosies "-n") compara lo aprobado
+        // (CC CONSOLIDADO) con lo asegurado en SINCO de las OC ligadas a sus CC. Las familias que comparten una OC
+        // se agrupan (un contrato que cubre dos comparativos). Estado lo pone el usuario en la tabla POR_CONTRATAR
+        // (Abierto/Cerrado) y se conserva al refrescar. Devuelve [Grupos = tabla, Familia = (cc, comp) => clave].
+        FnPorContratar = (t as table) as record =>
+            let
+                Umbral = 1000000, UmbralPct = 0.02,
+                Num = (v as any) as number => let n = try Number.From(v) otherwise null in if n = null then 0 else n,
+                Txt = (v as any) as text => if v = null then "" else Text.Trim(Text.From(v)),
+                Cod = (s as any) as nullable text =>
+                    let p = if s is text then List.Transform(Text.Split(s, "-"), Text.Trim) else {},
+                        n = List.FirstN(p, each _ <> "" and Text.Select(_, {"0".."9"}) = _)
+                    in if List.IsEmpty(n) then null else Text.Combine(n, "-"),
+                OCKey = (v as any) as text => let x = Text.Upper(Txt(v)), d = Text.Select(x, {"0".."9"}) in if d <> "" then d else x,
+                CCCod = (v as any) as text => Text.Trim(Text.BeforeDelimiter(Text.Upper(Txt(v)), "-")),
+                Filas = Table.Buffer(Table.SelectColumns(t, {"Tipo", "Centro de Costos", "# CC - Comparativo", "VT CC cons",
+                    "# OC / Contrato", "VT Asegurada", "Codigo act", "Valor Total ppto (CC)", "Actividad", "Ins", "Nombre Contratista"}, MissingField.UseNull)),
+                // Segmentos de la familia = los mas comunes en los codigos descargados (ej. "4723-17530" o "037")
+                CodsAdj = List.Select(List.Transform(Table.SelectRows(Filas, each [Tipo] = "ADJUDICADO")[#"# CC - Comparativo"], Cod), each _ <> null),
+                K = if List.IsEmpty(CodsAdj) then 1 else List.Mode(List.Transform(CodsAdj, each List.Count(Text.Split(_, "-")))),
+                Familia = (cc as any, comp as any) as nullable text =>
+                    let c = Cod(comp) in if c = null then null else CCCod(cc) & "|" & Text.Combine(List.FirstN(Text.Split(c, "-"), K), "-"),
+                AsegOC = Table.SelectRows(Table.Group(Table.AddColumn(Table.SelectRows(Filas, each [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS"),
+                    "__O", each OCKey([#"# OC / Contrato"]), type text), {"__O"},
+                    {{"__A", each List.Sum(List.Transform([VT Asegurada], Num)), type number}}), each [__O] <> "" and [__A] <> 0),
+                SetOC = Record.FromList(List.Repeat({true}, Table.RowCount(AsegOC)), AsegOC[__O]),
+                Enlaces = Table.Buffer(Table.Distinct(Table.SelectColumns(Table.SelectRows(Table.AddColumn(Table.AddColumn(
+                    Table.SelectRows(Filas, each [Tipo] = "CC"), "__O", each OCKey([#"# OC / Contrato"]), type text),
+                    "__F", each Familia([Centro de Costos], [#"# CC - Comparativo"]), type text),
+                    each [__F] <> null and Record.HasFields(SetOC, [__O])), {"__O", "__F"}))),
+                Aprob = Table.Buffer(Table.Group(Table.SelectRows(Table.AddColumn(Table.SelectRows(Filas, each [Tipo] = "CC CONSOLIDADO"),
+                    "__F", each Familia([Centro de Costos], [#"# CC - Comparativo"]), type text), each [__F] <> null), {"__F"}, {
+                    {"__Ap", each List.Sum(List.Transform([VT CC cons], Num)), type number},
+                    {"__CC", each List.First(List.Select([Centro de Costos], each Txt(_) <> ""), null), type text},
+                    {"__Nom", each let base = Text.AfterDelimiter([__F]{0}, "|"),
+                            l = List.Select([#"# CC - Comparativo"], each Cod(_) = base)
+                        in List.First(if List.IsEmpty(l) then List.RemoveNulls([#"# CC - Comparativo"]) else l, null), type text}})),
+                // Union de familias que comparten OC
+                PorOC = Table.Group(Enlaces, {"__O"}, {{"__Fs", each List.Distinct([__F]), type list}}),
+                Uniones = List.Accumulate(List.Select(PorOC[__Fs], each List.Count(_) > 1), {}, (g, fs) =>
+                    let toca = List.Select(g, each not List.IsEmpty(List.Intersect({_, fs})))
+                    in List.Select(g, each List.IsEmpty(List.Intersect({_, fs}))) & {List.Distinct(List.Combine(toca) & fs)}),
+                MapaUnion = Record.Combine({[]} & List.Transform(Uniones, (u) =>
+                    Record.FromList(List.Repeat({Text.Combine(List.Sort(u), "+")}, List.Count(u)), u))),
+                Grupo = (f as text) as text => Record.FieldOrDefault(MapaUnion, f, f),
+                AsegFam = Table.Group(Table.AddColumn(Table.Distinct(Table.AddColumn(Enlaces, "__G", each Grupo([__F]), type text), {"__O", "__G"}),
+                    "__A", each Record.Field(SetAsegOC, [__O]), type number), {"__G"}, {{"__As", each List.Sum([__A]), type number}}),
+                SetAsegOC = Record.FromList(AsegOC[__A], AsegOC[__O]),
+                AprobG = Table.AddColumn(Aprob, "__G", each Grupo([__F]), type text),
+                // Asegurado suelto: OC asegurada que no aparece en ningun CC (contrato sin cuadro) en una actividad del grupo.
+                // Se descuenta solo si es del mismo proveedor aprobado, o un CONTRATO del mismo insumo (las compras
+                // sueltas de material no cuentan). Si toca varios grupos se reparte segun su ppto en esa actividad.
+                // Claves solo con columnas que existen en la BD cargada y en BD_Origen: CC | codigo de la actividad.
+                ActK = (r as record) as nullable text =>
+                    let pre = Text.Trim(Text.BeforeDelimiter(Text.Upper(Txt(r[Actividad])), "-")),
+                        cod = if pre <> "" and Text.Remove(pre, {"0".."9", "."}) = "" then pre else Txt(r[Codigo act])
+                    in if cod = "" then null else CCCod(r[Centro de Costos]) & "|" & cod,
+                InsK = (r as record) as nullable text =>
+                    let k = ActK(r), i = Text.Upper(Txt(r[Ins])) in if k = null or i = "" then null else k & "|" & i,
+                NomK = (v as any) as text =>
+                    let x = Text.Select(Text.Upper(Txt(FnRemoveAccentsSymbols(Txt(v)))), {"A".."Z", "0".."9"}),
+                        suf = List.First(List.Select({"SAS", "LTDA", "SA", "EU"}, each Text.EndsWith(x, _) and Text.Length(x) > Text.Length(_) + 3), null)
+                    in if suf = null then x else Text.Start(x, Text.Length(x) - Text.Length(suf)),
+                SetOCenCC = let l = List.Distinct(List.Select(List.Transform(Table.SelectRows(Filas, each [Tipo] = "CC")[#"# OC / Contrato"], OCKey), each _ <> ""))
+                    in Record.FromList(List.Repeat({true}, List.Count(l)), l),
+                GrupoDe = (r as record) as nullable text =>
+                    let f = Familia(r[Centro de Costos], r[#"# CC - Comparativo"]) in if f = null then null else Grupo(f),
+                AdjG = Table.Buffer(Table.SelectRows(Table.AddColumn(Table.AddColumn(Table.AddColumn(Table.SelectRows(Filas, each [Tipo] = "ADJUDICADO"),
+                    "__G", each GrupoDe(_), type text), "__K", each ActK(_), type text), "__KI", each InsK(_), type text), each [__G] <> null)),
+                PptoAdjG = Table.Group(AdjG, {"__G"}, {{"PptoAdj", each List.Sum(List.Transform([#"Valor Total ppto (CC)"], Num)), type number}}),
+                AdjConK = Table.SelectRows(AdjG, each [__K] <> null),
+                PptoGA = let g = Table.Group(AdjConK, {"__K", "__G"}, {{"__P", each List.Sum(List.Transform([#"Valor Total ppto (CC)"], Num)), type number}})
+                    in Record.FromList(g[__P], List.Transform(Table.ToRecords(g), each [__K] & "#" & [__G])),
+                GruposPorAct = let g = Table.Group(AdjConK, {"__K"}, {{"__Gs", each List.Distinct([__G]), type list}}) in Record.FromList(g[__Gs], g[__K]),
+                InsSet = let l = List.Distinct(List.Transform(Table.ToRecords(Table.SelectRows(AdjConK, each [__KI] <> null)), each [__G] & "#" & [__KI]))
+                    in Record.FromList(List.Repeat({true}, List.Count(l)), l),
+                ProvG = let x = Table.SelectRows(Table.AddColumn(Table.AddColumn(Table.SelectRows(Filas, each [Tipo] = "CC CONSOLIDADO"),
+                            "__G", each GrupoDe(_), type text), "__N", each NomK([Nombre Contratista]), type text), each [__G] <> null and Text.Length([__N]) >= 4),
+                        g = Table.Group(x, {"__G"}, {{"__Ns", each List.Distinct([__N]), type list}})
+                    in Record.FromList(g[__Ns], g[__G]),
+                Sueltas = Table.SelectRows(Table.AddColumn(Table.SelectRows(Filas, each ([Tipo] = "CONTRATO" or [Tipo] = "COMPRAS")
+                        and Num([VT Asegurada]) <> 0 and not Record.HasFields(SetOCenCC, OCKey([#"# OC / Contrato"]))),
+                    "__K", each ActK(_), type text), each [__K] <> null and Record.HasFields(GruposPorAct, [__K])),
+                Reparto = Table.AddColumn(Sueltas, "__Rep", each
+                    let k = [__K], n = NomK([Nombre Contratista]), ki = InsK(_), contrato = [Tipo] = "CONTRATO",
+                        gs = List.Select(Record.Field(GruposPorAct, k), (g) =>
+                            (Text.Length(n) >= 4 and List.AnyTrue(List.Transform(Record.FieldOrDefault(ProvG, g, {}), (p) => Text.Contains(p, n) or Text.Contains(n, p))))
+                            or (contrato and ki <> null and Record.HasFields(InsSet, g & "#" & ki))),
+                        ps = List.Transform(gs, (g) => Num(Record.FieldOrDefault(PptoGA, k & "#" & g, 0))), tot = List.Sum(ps), a = Num([VT Asegurada])
+                    in List.Transform(List.Positions(gs), (i) => [__G = gs{i}, __X = if tot = 0 then a / List.Count(gs) else a * ps{i} / tot])),
+                SueltoG = Table.Group(Table.SelectRows(Table.ExpandRecordColumn(Table.ExpandListColumn(Table.SelectColumns(Reparto, {"__Rep"}), "__Rep"),
+                    "__Rep", {"__G", "__X"}), each [__G] <> null), {"__G"}, {{"Suelto", each List.Sum([__X]), type number}}),
+                Estados = let e = try Excel.CurrentWorkbook(){[Name = "POR_CONTRATAR"]}[Content] otherwise #table({"Centro de Costos", "Comparativo", "Estado"}, {}),
+                        c = Table.SelectRows(e, each Text.Upper(Txt(Record.FieldOrDefault(_, "Estado", null))) = "CERRADO")
+                    in List.Buffer(List.RemoveNulls(List.Combine(List.Transform(Table.ToRecords(c), (r) =>
+                        List.Transform(Text.Split(Txt(r[Comparativo]), " / "), each Familia(r[Centro de Costos], _)))))),
+                Grupos = Table.Group(AprobG, {"__G"}, {
+                    {"Familias", each [__F], type list},
+                    {"Centro de Costos", each Table.Sort(_, {{"__Ap", Order.Descending}}){0}[__CC], type text},
+                    {"Comparativo", each Text.Combine(List.RemoveNulls(Table.Sort(_, {{"__F", Order.Ascending}})[__Nom]), " / "), type text},
+                    {"Aprobado", each List.Sum([__Ap]), type number}}),
+                ConAseg0 = Table.ExpandTableColumn(Table.NestedJoin(Grupos, {"__G"}, AsegFam, {"__G"}, "__X", JoinKind.LeftOuter), "__X", {"__As"}),
+                ConAseg1 = Table.ExpandTableColumn(Table.NestedJoin(ConAseg0, {"__G"}, SueltoG, {"__G"}, "__Y", JoinKind.LeftOuter), "__Y", {"Suelto"}),
+                ConAseg = Table.ExpandTableColumn(Table.NestedJoin(ConAseg1, {"__G"}, PptoAdjG, {"__G"}, "__Z", JoinKind.LeftOuter), "__Z", {"PptoAdj"}),
+                Final = Table.AddColumn(ConAseg, "__R", each
+                    let a = if [__As] = null then 0 else [__As], su = if [Suelto] = null then 0 else [Suelto],
+                        pa = if [PptoAdj] = null then 0 else [PptoAdj], p = [Aprobado] - a - su,
+                        cerrado = not List.IsEmpty(List.Intersect({[Familias], Estados}))
+                    // Sin filas ADJUDICADO (aprobado sin descargar) no hay actividad donde proyectar: sale en COMPARATIVOS POR SUBIR
+                    in [Asegurado = a, Valor = p, Contratado = a <> 0, Estado = if cerrado then "Cerrado" else "Abierto",
+                        Mostrar = cerrado or (pa > 0 and p >= Umbral and p >= UmbralPct * [Aprobado])]),
+                Tabla = Table.ExpandRecordColumn(Final, "__R", {"Asegurado", "Valor", "Contratado", "Estado", "Mostrar"})
+            in [Grupos = Table.Buffer(Tabla), Familia = Familia]
     ]
 in
     Funciones
