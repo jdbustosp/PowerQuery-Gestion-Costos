@@ -22,7 +22,8 @@ let
         "Cantidad_Calc", "V/U ppto (CC)", "Cantidad CC Cons", "V/U CC cons", "VT CC cons",
         "VR_Bruto_con_desc", "Estado", "Fecha_de_pago", "# Prov._(descue", "No_Prov",
         "Centros_de_costos", "Clasificador_Actividad", "Capitulo_Costo directo", "Capitulo_Centro_Costos",
-        "NIT", "No_Factura", "Fecha_Factura"
+        "NIT", "No_Factura", "Fecha_Factura",
+        "VR_antes_de_IVA", "VR_IVA", "VR_Bruto", "Anticipos", "Retegarantia", "Rte_Fte", "Rte_ICA", "Rte_IVA", "Rte_FIC", "Descuentos", "Valor_A_Girar", "Validacion"
     },
     NumCols = {
         "Cantidad Proyectado", "VT Proyectado", "Cantidad Consumido", "VT Consumido",
@@ -58,7 +59,7 @@ let
     ColumnasReordenadas_Trim = Table.RemoveColumns(ColumnasReordenadas, {
         "V/U Comprado", "V/U Contratado", "V/U Presupuesto",
         "VT Cons Cols",
-        "Estado", "Fecha_de_pago", "Clasificador_Actividad",
+        "Clasificador_Actividad",
         "Capitulo_Costo directo", "Fecha_Factura"
     }, MissingField.Ignore),
 
@@ -972,7 +973,8 @@ let
     ConFechaAprob = Table.AddColumn(ConClasifFactura, "Fecha aprobacion", each
         Record.FieldOrDefault(MemoFechaComp, FnKeyFila(_), null), type nullable date),
     FinalRecortada = Table.SelectColumns(ConFechaAprob, ColumnasFinalesArboleda & {"OC", "Tipo OC", "CC OC", "Contratista OC", "Clasificador OC", "Factura", "Invertido factura", "No_Prov seg", "Fila real", "Aseg prov", "Comp prov", "Inv prov", "Desc prov", "Teorico fijo", "Clasif desperdicio", "Contratista almacen", "VT Adicionales",
-        "Cant. entradas", "Cant. salidas", "Cant. teorica", "Material", "Tipologia", "TipoElemento", "Piso", "Codigo ins", "Cantidad SINCO clasificado", "VT SINCO clasificado", "Cantidad asegurada SINCO", "VT asegurado SINCO", "Fecha aprobacion"}, MissingField.UseNull),
+        "Cant. entradas", "Cant. salidas", "Cant. teorica", "Material", "Tipologia", "TipoElemento", "Piso", "Codigo ins", "Cantidad SINCO clasificado", "VT SINCO clasificado", "Cantidad asegurada SINCO", "VT asegurado SINCO", "Fecha aprobacion",
+        "Estado", "Fecha_de_pago", "VR_antes_de_IVA", "VR_IVA", "VR_Bruto", "Anticipos", "Retegarantia", "Rte_Fte", "Rte_ICA", "Rte_IVA", "Rte_FIC", "Descuentos", "Valor_A_Girar", "Validacion"}, MissingField.UseNull),
 
     TablaMaestraFinal = Table.Buffer(LimpiarTabla(FinalRecortada))
 in

@@ -19,7 +19,9 @@ let
             codAct = CodigoActividad(act),
             codIns = CodigoInsumo(r[#"Codigo ins"])
         in [
-            CCKey = ClaveTexto(r[Centro de Costos]),
+            // Solo el codigo del CC (2026-11-22): PPTO y DESCARGAS pueden traer nombres distintos del mismo centro
+            CCKey = let k = ClaveTexto(r[Centro de Costos]), c = Text.Trim(Text.BeforeDelimiter(k, "-"))
+                in if c <> "" and Text.Select(c, {"0".."9"}) = c then c else k,
             CapKey = ClaveTexto(r[Capitulo]),
             SubKey = ClaveTexto(subFinal),
             ActKey = if codAct = "" then ClaveTexto(act) else codAct,

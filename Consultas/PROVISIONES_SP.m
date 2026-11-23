@@ -48,14 +48,20 @@ let
         {"Clasificador_Actividad", "Clasificador"}
     }, MissingField.Ignore),
 
+    ColsPago = {"VR_antes_de_IVA", "VR_IVA", "VR_Bruto", "Anticipos", "Retegarantia", "Rte_Fte", "Rte_ICA", "Rte_IVA",
+        "Rte_FIC", "Descuentos", "Valor_A_Girar", "Validacion"},
+
     // 3. Estandarizacion de tipos de datos
     TextosLimpios = Table.TransformColumns(ColumnasRenombradas, {
         {"PROYECTO", each FnTrimText(_), type text},
         {"Nombre Contratista", each FnTrimText(_), type text},
         {"# OC / Contrato", each FnTrimText(_), type text},
         {"Clasificador", each FnTrimText(_), type text},
-        {"VR_Bruto_con_desc", each FxToNumberFlex(_), type number}
-    }, null, MissingField.Ignore),
+        {"VR_Bruto_con_desc", each FxToNumberFlex(_), type number},
+        // Detalle del pago (2026-11-22, pedido de Juan): pasa a BD en las filas PROVISIONES
+        {"Estado", each FnTrimText(_), type text},
+        {"Fecha_de_pago", each if _ is date then _ else if _ is datetime then Date.From(_) else null, type nullable date}
+    } & List.Transform(ColsPago, each {_, FxToNumberFlex, type number}), null, MissingField.Ignore),
 
     // 4. Agregar la etiqueta Tipo y Centro de Costos
     SinTipoOriginal = Table.RemoveColumns(TextosLimpios, {"Tipo"}, MissingField.Ignore),
