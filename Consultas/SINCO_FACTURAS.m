@@ -2,8 +2,8 @@ let
     // SINCO_FACTURAS (2026-10-05): facturas de SINCO por OC/contrato, desde los informes
     // "Informe relacion de pagos - pagos" (actas de contratos, valor Total = neto + IVA) y
     // "<centro> - Facturacion de entradas y actas" (entradas de almacen facturadas, Valor Total).
-    // Los informes viven en <Reportes EDT>/<proyecto>/<centro>/Actual. Se leen aparte de
-    // SP_Archivos_Proyecto para no mezclarlos con los demas reportes.
+    // Los informes viven en <Reportes EDT>/<proyecto>/<centro>/Actual. El listado sale de
+    // SP_Archivos_Proyecto (2026-11-22; antes se listaban otra vez las mismas carpetas).
     FxToNumberFlex = F_Globales[FxToNumberFlex],
     FnDecodeHtml = F_Globales[FnDecodeHtml],
     FnBuildColumnas = F_Globales[FnBuildColumnas],
@@ -18,16 +18,9 @@ let
             sinCeros = Text.TrimStart(t, "0")
         in sinCeros,
 
-    CCFolders = try Table.RenameColumns(SP_CarpetasCC, {{"Centro de Costos", "Name"}}) otherwise #table({"Name"}, {}),
-    ConArchivos = Table.AddColumn(CCFolders, "Archivos", each
-        let r = try Json.Document(Web.Contents(SiteUrl, [
-                RelativePath = "/_api/web/GetFolderByServerRelativeUrl('" & FnEncode(BasePath & "/" & [Name] & "/Actual") & "')/Files",
-                Query = [#"$select" = "Name,ServerRelativeUrl"],
-                Headers = [Accept = "application/json;odata=nometadata"],
-                Timeout = #duration(0, 0, 2, 0)])) otherwise null
-        in if r <> null and Record.HasFields(r, "value") then Table.FromRecords(r[value], {"Name", "ServerRelativeUrl"}, MissingField.UseNull) else null),
-    Validos = Table.SelectRows(ConArchivos, each [Archivos] <> null),
-    Expandido = Table.ExpandTableColumn(Validos, "Archivos", {"Name", "ServerRelativeUrl"}, {"Archivo", "Url"}),
+    Expandido = try Table.RenameColumns(Table.SelectColumns(SP_Archivos_Proyecto, {"Centro de Costos", "Name", "ServerRelativeUrl"}),
+            {{"Name", "Archivo"}, {"ServerRelativeUrl", "Url"}})
+        otherwise #table({"Centro de Costos", "Archivo", "Url"}, {}),
     ConFuente = Table.AddColumn(Expandido, "Fuente", each
         let n = Text.Upper([Archivo]) in
         if Text.StartsWith(n, "~$") then null

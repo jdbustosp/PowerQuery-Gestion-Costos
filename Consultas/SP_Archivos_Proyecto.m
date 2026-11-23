@@ -45,7 +45,12 @@ let
             Text.Contains([FileName], "ENTRADAS POR INSUMO",           Comparer.OrdinalIgnoreCase) or
             Text.Contains([FileName], "MASIVO SALIDAS",                Comparer.OrdinalIgnoreCase) or
             Text.Contains([FileName], "ESTADO DE CONTRATOS",           Comparer.OrdinalIgnoreCase) or
-            Text.Contains([FileName], "DESCUENTOS",                    Comparer.OrdinalIgnoreCase)
+            Text.Contains([FileName], "DESCUENTOS",                    Comparer.OrdinalIgnoreCase) or
+            // facturas (SINCO_FACTURAS): un solo listado de carpetas para todo el libro
+            Text.Contains([FileName], "RELACION DE PAGOS",             Comparer.OrdinalIgnoreCase) or
+            Text.Contains([FileName], "RELACI#(00D3)N DE PAGOS",       Comparer.OrdinalIgnoreCase) or
+            Text.Contains([FileName], "FACTURACION DE ENTRADAS",       Comparer.OrdinalIgnoreCase) or
+            Text.Contains([FileName], "FACTURACI#(00D3)N DE ENTRADAS", Comparer.OrdinalIgnoreCase)
         )
     ),
 

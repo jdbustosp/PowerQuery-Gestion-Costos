@@ -59,9 +59,8 @@ let
         not Text.StartsWith([Name], "~$") and
         Text.EndsWith(Text.Upper([Name]), ".XLSX")),
     NombreBase = (n as text) as text => Text.Upper(Text.Trim(Text.Start(n, Text.Length(n) - 5))),
-    Exactos = Table.SelectRows(SoloExcel, each NombreBase([Name]) = ProyUp),
-    Contienen = Table.SelectRows(SoloExcel, each Text.Contains(Text.Upper([Name]), ProyUp)),
-    Candidatos = if Table.RowCount(Exactos) > 0 then Exactos else Contienen,
+    // Solo nombre exacto (<ProyectoActual>.xlsx): con "contiene", PROYECTO X tomaria PROYECTO X 2.xlsx (2026-11-22)
+    Candidatos = Table.SelectRows(SoloExcel, each NombreBase([Name]) = ProyUp),
     Ruta = if Table.RowCount(Candidatos) = 0 then null else Candidatos{0}[ServerRelativeUrl],
 
     // ---------- Leer la tabla DESCARGA ----------

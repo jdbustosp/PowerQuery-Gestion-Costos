@@ -625,12 +625,23 @@ let
     TeoMamposteria = try Table.Buffer(TEORICO_MAMPOSTERIA) otherwise TeoVacio,
 
     TeoRepartido = Table.Combine({TeoConcreto, TeoMamposteria}),
+    // MEMORIAS es manual y puede venir copiada de otro proyecto: su CC debe ser uno del presupuesto (filas PPTO).
+    // Igual por nombre o por codigo -> CC del presupuesto; vacio con un solo CC -> ese CC; si no, queda marcado
+    // para que se vea en las dinamicas y no se sume al teorico del proyecto.
+    CCsPpto = List.Buffer(List.Distinct(List.Select(Table.SelectRows(LlavesLimpias, each [Tipo] = "PPTO")[Centro de Costos],
+        each _ is text and Text.Trim(_) <> ""))),
+    FnCCTeo = (cc as text) as text =>
+        if List.IsEmpty(CCsPpto) or List.Contains(CCsPpto, cc) then cc
+        else if cc = "" then (if List.Count(CCsPpto) = 1 then CCsPpto{0} else cc)
+        else let cod = if Text.Contains(cc, "-") then FnCodCC(cc) else "",
+                 m = if cod = "" then {} else List.Select(CCsPpto, each Text.Contains(_, "-") and FnCodCC(_) = cod)
+             in if List.Count(m) = 1 then m{0} else "CC NO ES DEL PROYECTO: " & cc,
     TeoConNombre = if Value.Is(FX_INSUMO_CC, type function) then Table.AddColumn(TeoRepartido, "__InsCC", each FX_INSUMO_CC([Centro de Costos], [Ins]), type text)
                    else error "No se pudo validar el mapa de equivalencias por centro de costos.",
     TeoResuelto = Table.RenameColumns(Table.RemoveColumns(TeoConNombre, {"Ins"}), {{"__InsCC", "Ins"}}),
     TeoNormal = Table.SelectRows(Table.TransformColumns(TeoResuelto, {
         {"Material", FnTextoODef, type text}, {"Tipologia", FnTextoODef, type text},
-        {"Centro de Costos", each FnCCCanon(Text.Upper(FnTextoODef(_))), type text},
+        {"Centro de Costos", each FnCCTeo(FnCCCanon(Text.Upper(FnTextoODef(_)))), type text},
         {"TipoElemento", FnTextoODef, type text}, {"Piso", FnTextoODef, type text},
         {"Ins", each try Text.Upper(FnTextoODef(FnRemoveAccentMarks(_))) otherwise "", type text}}), each [Ins] <> ""),
     ClasifSalidas = FnMapaModa(
@@ -672,7 +683,7 @@ let
     OCsValidas = List.Buffer(DimOCCompleta[__OC]),
     SetOCsValidas = FnConjunto(OCsValidas),
 
-    CCProyecto = FnModaTxt(ConTeorico[Centro de Costos]),
+    CCProyecto = FnModaTxt(ConAlmacen[Centro de Costos]),  // sin el teorico (MEMORIAS es manual)
     MapaCCOC = Record.FromList(DimOCCompleta[CC OC], DimOCCompleta[__OC]),
     FnCCOC = (oc as nullable text) as nullable text => let c = if oc = null then null else Record.FieldOrDefault(MapaCCOC, oc, null) in if c = null then CCProyecto else c,
 
