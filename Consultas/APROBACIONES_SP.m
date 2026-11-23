@@ -72,7 +72,16 @@ let
         let c = FnRemoveAccentsSymbols(Text.Upper(Text.From([#"# CC - Comparativo"])))
         in c = null or not Text.Contains(c, "INDIRECTO")),
 
-    AgregadoTipo = Table.AddColumn(SoloDirectos, "Tipo", each "CC Consolidado", type text),
+    // Fecha de aprobacion (2026-11-22): la del nombre del archivo aprobado ("... - AAAAMMDD.xlsx").
+    // Las filas del historial cargado en bloque no la traen: quedan vacias (su "Archivo fecha" es la de carga).
+    FnFechaNombre = (n as any) as nullable date =>
+        let t = try Text.BeforeDelimiter(Text.From(n), ".", {0, RelativePosition.FromEnd}) otherwise "",
+            d = Text.End(t, 8)
+        in if Text.Length(t) >= 8 and Text.Remove(d, {"0".."9"}) = "" and Text.End(Text.Start(t, Text.Length(t) - 8), 1) = " "
+           then (try #date(Number.From(Text.Start(d, 4)), Number.From(Text.Middle(d, 4, 2)), Number.From(Text.End(d, 2))) otherwise null)
+           else null,
+    ConFecha = Table.AddColumn(SoloDirectos, "Fecha aprobacion", each FnFechaNombre(Record.FieldOrDefault(_, "Archivo origen", null)), type nullable date),
+    AgregadoTipo = Table.AddColumn(ConFecha, "Tipo", each "CC Consolidado", type text),
     AgregadoCC = Table.AddColumn(AgregadoTipo, "Centro de Costos", each
         if Text.StartsWith(Text.Upper(ParamProyecto), "PAMPLONA 1") and [#"# CC - Comparativo"] <> null then
             let
@@ -97,7 +106,8 @@ let
             "Cantidad CC Cons",
             "V/U CC cons",
             "VT CC cons",
-            "Clasificador"
+            "Clasificador",
+            "Fecha aprobacion"
         },
         MissingField.Ignore
     )

@@ -931,8 +931,48 @@ let
         if [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS" then ToNumber0([Cantidad asegurada]) else 0, type number),
     ConValorAsegSINCO = Table.AddColumn(ConCantidadAsegSINCO, "VT asegurado SINCO", each
         if [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS" then ToNumber0([VT Asegurada]) else 0, type number),
-    FinalRecortada = Table.SelectColumns(ConValorAsegSINCO, ColumnasFinalesArboleda & {"OC", "Tipo OC", "CC OC", "Contratista OC", "Clasificador OC", "Factura", "Invertido factura", "No_Prov seg", "Fila real", "Aseg prov", "Comp prov", "Inv prov", "Desc prov", "Teorico fijo", "Clasif desperdicio", "Contratista almacen", "VT Adicionales",
-        "Cant. entradas", "Cant. salidas", "Cant. teorica", "Material", "Tipologia", "TipoElemento", "Piso", "Codigo ins", "Cantidad SINCO clasificado", "VT SINCO clasificado", "Cantidad asegurada SINCO", "VT asegurado SINCO"}, MissingField.UseNull),
+    // Clasificador en filas FACTURA (2026-11-22): el de la OC si es unico; si la OC tiene varios, el de las
+    // entradas de almacen de esa factura (documento "EA <n>" del informe) con mayor valor facturado.
+    ClasifEntrada = let t = Table.SelectRows(ConOCd, each [Tipo] = "COMPRAS" and FnTieneTexto([#"#ENTRADA"]) and FnTieneTexto([Clasificador])),
+            k = Table.AddColumn(t, "__E", each FnOCDin(Text.From(try Int64.From(Number.From([#"#ENTRADA"])) otherwise [#"#ENTRADA"])), type text),
+            g = Table.Group(k, {"__E"}, {{"__C", each FnModaTxt([Clasificador]), type text}})
+        in Record.FromList(g[__C], g[__E]),
+    ClasifFactT = let
+            t = Table.SelectRows(Table.AddColumn(FactSinco, "__C", each
+                    let d = try Text.Upper([Documento]) otherwise "" in
+                    if Text.StartsWith(d, "EA ") then Record.FieldOrDefault(ClasifEntrada, FnOCDin(d), null) else null, type text),
+                each [__C] <> null),
+            g = Table.Group(t, {"OC", "FacturaClave", "__C"}, {{"__V", each List.Sum([Valor]), type number}}),
+            m = Table.Group(g, {"OC", "FacturaClave"}, {{"__C", each Table.Max(_, "__V")[__C], type text}})
+        in Record.FromList(m[__C], List.Transform(Table.ToRecords(m), each [OC] & "|" & [FacturaClave])),
+    FnClasifFactura = (r as record) as any =>
+        if r[Tipo] <> "FACTURA" or FnTieneTexto(r[Clasificador]) then r[Clasificador]
+        else let co = r[Clasificador OC],
+                 porFact = if r[OC] = null then null else Record.FieldOrDefault(ClasifFactT, r[OC] & "|" & FnFacturaDin(r[Factura]), null)
+             in if co <> null and co <> "Varios clasificadores" and co <> "(sin clasificador)" then co
+                else if porFact <> null then porFact else co,
+    ConClasifFactura = Table.RenameColumns(Table.RemoveColumns(Table.AddColumn(ConValorAsegSINCO, "__ClasifF", FnClasifFactura, type text),
+        {"Clasificador"}), {{"__ClasifF", "Clasificador"}}),
+    // Fecha de aprobacion del comparativo (APROBACIONES_SP), por CC + numero de comparativo: la ultima.
+    FnKeyFechaComp = (cc as any, comp as any) as nullable text =>
+        let p = if comp is text and comp <> "" then FnPartesComp(comp) else null
+        in if p = null then null else FnClaveMaestro(cc) & "|" & p[Num],
+    FechaComp = let
+            t = Table.SelectRows(Table.AddColumn(Table.SelectRows(T_Aprob, each Record.FieldOrDefault(_, "Fecha aprobacion", null) <> null),
+                "__K", each FnKeyFechaComp([Centro de Costos], [#"# CC - Comparativo"]), type text), each [__K] <> null),
+            g = Table.Group(t, {"__K"}, {{"__F", each List.Max([Fecha aprobacion]), type date}})
+        in Record.FromList(g[__F], g[__K]),
+    FnKeyFila = (r as record) as text => FnTextoODef(r[Centro de Costos]) & "||" & FnTextoODef(r[#"# CC - Comparativo"]),
+    MemoFechaComp = let
+            p = Table.Distinct(Table.AddColumn(Table.SelectColumns(ConClasifFactura, {"Centro de Costos", "# CC - Comparativo"}), "__R", FnKeyFila, type text), {"__R"}),
+            f = Table.SelectRows(Table.AddColumn(p, "__F", each
+                    let k = FnKeyFechaComp([Centro de Costos], [#"# CC - Comparativo"]) in if k = null then null else Record.FieldOrDefault(FechaComp, k, null)),
+                each [__F] <> null)
+        in Record.FromList(f[__F], f[__R]),
+    ConFechaAprob = Table.AddColumn(ConClasifFactura, "Fecha aprobacion", each
+        Record.FieldOrDefault(MemoFechaComp, FnKeyFila(_), null), type nullable date),
+    FinalRecortada = Table.SelectColumns(ConFechaAprob, ColumnasFinalesArboleda & {"OC", "Tipo OC", "CC OC", "Contratista OC", "Clasificador OC", "Factura", "Invertido factura", "No_Prov seg", "Fila real", "Aseg prov", "Comp prov", "Inv prov", "Desc prov", "Teorico fijo", "Clasif desperdicio", "Contratista almacen", "VT Adicionales",
+        "Cant. entradas", "Cant. salidas", "Cant. teorica", "Material", "Tipologia", "TipoElemento", "Piso", "Codigo ins", "Cantidad SINCO clasificado", "VT SINCO clasificado", "Cantidad asegurada SINCO", "VT asegurado SINCO", "Fecha aprobacion"}, MissingField.UseNull),
 
     TablaMaestraFinal = Table.Buffer(LimpiarTabla(FinalRecortada))
 in
