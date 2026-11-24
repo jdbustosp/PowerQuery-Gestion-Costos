@@ -163,9 +163,24 @@ let
         not List.Contains({"ZOTROS", "SIN CLASIFICADOR", "(SIN CLASIFICADOR)", "NO APLICA", "-"}, Text.Upper([Clasificador])))),
     ClasifAprobComp = FnMapaUnico(FilasClasifAprob, FnClaveComp, "Clasificador"),
     ClasifAprobIns = FnMapaUnico(FilasClasifAprob, FnClaveCompIns, "Clasificador"),
+    // Comparativo registrado en un centro distinto al de su aprobacion (Det_CC o descarga en otra etapa): si no
+    // cruza por centro, se busca el comparativo sin centro (quitando el prefijo de centro si lo trae) y solo se usa
+    // si tiene un unico clasificador en todo el libro (2026-11-24).
+    PrefijosCentro = List.Buffer(List.Select(List.Distinct(List.Transform(
+        List.Select(List.Distinct(FiltroTipoValido[Centro de Costos]), each _ is text),
+        each Text.BeforeDelimiter(FnClaveMaestro(_), "-"))), each _ <> "")),
+    FnClaveCompSinCentro = (r as record) as nullable text =>
+        let
+            comp0 = F_Globales[FnNormalizeComparativo](r[#"# CC - Comparativo"]),
+            comp = if comp0 is text then Text.Upper(comp0) else "",
+            pre = Text.BeforeDelimiter(comp, "-"),
+            local = if Text.Contains(comp, "-") and List.Contains(PrefijosCentro, pre) then Text.AfterDelimiter(comp, "-") else comp
+        in if not FnCompReal(local) then null else FnClaveMaestro(F_Globales[FnNormalizeComparativo](local)),
+    ClasifAprobSinCentro = FnMapaUnico(FilasClasifAprob, FnClaveCompSinCentro, "Clasificador"),
     FnClasifAprob = (r as record) as nullable text =>
-        let i = FnBuscar(ClasifAprobIns, FnClaveCompIns(r))
-        in if i <> null then i else FnBuscar(ClasifAprobComp, FnClaveComp(r)),
+        let i = FnBuscar(ClasifAprobIns, FnClaveCompIns(r)),
+            c = if i <> null then i else FnBuscar(ClasifAprobComp, FnClaveComp(r))
+        in if c <> null then c else FnBuscar(ClasifAprobSinCentro, FnClaveCompSinCentro(r)),
     ClasifDetComp   = FnMapaModa(FnFilasClasif("CC"), FnClaveComp, "Clasificador"),
     ClasifDetOCIns  = FnMapaModa(FnFilasClasif("CC"), FnClaveOCIns, "Clasificador"),
     ClasifDetOC     = FnMapaUnico(FnFilasClasif("CC"), FnClaveOC, "Clasificador"),

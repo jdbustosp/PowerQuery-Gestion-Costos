@@ -39,6 +39,20 @@ let
         "__Comp", each ClaveComparativo(_), type nullable text),
     Aprobados = Table.Buffer(Table.SelectRows(AprobadosConClave, each [__Comp] <> null)),
     AprobadosPorComparativo = IndiceUnico(Aprobados, "__Comp", "Clasificador"),
+    // Comparativo registrado en un centro distinto al de su aprobacion: se busca sin centro (quitando el prefijo
+    // de centro de 4+ digitos si lo trae) y solo si tiene un unico clasificador en todo el libro (2026-11-24).
+    ClaveSinCentro = (r as record) as nullable text =>
+        let
+            comp = ClaveTexto(r[#"# CC - Comparativo"]),
+            pre = Text.BeforeDelimiter(comp & "-", "-"),
+            cola = Text.AfterDelimiter(comp, "-"),
+            consecutivo = Text.BeforeDelimiter(cola & "-", "-"),
+            quita = Text.Length(pre) >= 4 and Text.Select(pre, {"0".."9"}) = pre and Text.Contains(cola, "-")
+                and consecutivo <> "" and Text.Select(consecutivo, {"0".."9"}) = consecutivo,
+            local = if quita then cola else comp
+        in if not EsReal(local) then null else F_Globales[FnNormalizeComparativo](local),
+    AprobadosSinCentro = IndiceUnico(
+        Table.AddColumn(Aprobados, "__SC", each ClaveSinCentro(_), type nullable text), "__SC", "Clasificador"),
     AprobadosPorInsumo = IndiceUnico(
         Table.AddColumn(Aprobados, "__Ins", each ConInsumo([__Comp], _), type nullable text), "__Ins", "Clasificador"),
     // Si el comparativo tiene varios clasificadores y el insumo no cruza por nombre (el consolidado
@@ -91,7 +105,8 @@ let
             let
                 comp = ClaveComparativo(r),
                 ins = Buscar(AprobadosPorInsumo, ConInsumo(comp, r)),
-                aprobado = if ins <> null then ins else Buscar(AprobadosPorComparativo, comp),
+                aprobado0 = if ins <> null then ins else Buscar(AprobadosPorComparativo, comp),
+                aprobado = if aprobado0 <> null or comp = null then aprobado0 else Buscar(AprobadosSinCentro, ClaveSinCentro(r)),
                 manual = if aprobado <> null then null else Buscar(ManualPorInsumo, ClaveTexto(r[Ins])),
                 mayor = if aprobado <> null or manual <> null then null else Buscar(AprobadosPorComparativoMayor, comp)
             in if aprobado <> null then aprobado else if manual <> null then manual else if mayor <> null then mayor else "zOtros",
