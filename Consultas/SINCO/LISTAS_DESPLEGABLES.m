@@ -9,8 +9,10 @@ let
     Txt = (v as any) as text => if v = null then "" else Text.Trim(Text.From(v)),
     Norm = (v as any) as text => Text.Replace(Text.Replace(Text.Upper(Txt(v)), Character.FromNumber(209), "N"), Character.FromNumber(241), "N"),
     Col = (t as table, c as text) as list => if Table.HasColumns(t, c) then Table.Column(t, c) else List.Repeat({null}, Table.RowCount(t)),
+    // Lista vacia -> una fila con Valor nulo, para que el nombre DESREF no quede en #N/A
     Filas = (lista as text, valores as list) as list =>
-        List.Transform(List.Distinct(List.Select(List.Transform(valores, Txt), each _ <> "")), each {lista, _}),
+        let v = List.Distinct(List.Select(List.Transform(valores, Txt), each _ <> ""))
+        in if List.IsEmpty(v) then {{lista, null}} else List.Transform(v, each {lista, _}),
     // CAT_TECNICO
     Cat = Table.Buffer(Tabla("CAT_TECNICO")),
     CatRec = Table.ToRecords(Table.SelectColumns(Cat, {"Familia", "Categoria", "Tipo", "Parametro"}, MissingField.UseNull)),
@@ -25,7 +27,9 @@ let
     Catalogo = Table.Buffer(Tabla("CATALOGO_INSUMOS_CC")),
     CatIns = List.Transform(Table.ToRecords(Table.SelectColumns(Catalogo, {"Ins", "Clasificador", "Clasificador manual"}, MissingField.UseNull)),
         each [Ins = Txt([Ins]), Clase = if Txt([Clasificador manual]) <> "" then Txt([Clasificador manual]) else Txt([Clasificador])]),
-    InsDe = (clase as text) as list => List.Sort(List.Distinct(List.Transform(List.Select(CatIns, each [Clase] = clase), each [Ins]))),
+    // Insumos de la clase (manual o de BD) o que contengan alguna palabra clave (igual que el bloque de formulas anterior)
+    InsDe = (clase as text, claves as list) as list => List.Sort(List.Distinct(List.Transform(List.Select(CatIns, each [Ins] <> "" and
+        ([Clase] = clase or List.AnyTrue(List.Transform(claves, (k) => Text.Contains(Text.Upper([Ins]), k))))), each [Ins]))),
     InsConcretoMem = List.Sort(List.Distinct(List.Select(List.Transform(CatIns, each Text.Upper([Ins])), each
         (Text.StartsWith(_, "CONCRETO ") or Text.StartsWith(_, "M_CONCRETO ")) and Text.EndsWith(_, "(M3)")))),
     // ASIGNACION: estructuras/edificaciones
@@ -41,11 +45,11 @@ let
         Filas("REF MORTERO PISO", CatSel("Enchape", "Referencia", "Mortero piso", "Parametro")),
         Filas("TIPO ACERO", List.Sort(List.Transform(AceroRef, each Txt([Tipo])))),
         RefAcero,
-        Filas("INS CONCRETO", InsDe("Concreto")),
-        Filas("INS ACERO", InsDe("Acero")),
-        Filas("INS MORTERO", InsDe("Morteros")),
-        Filas("INS BLOQUES", InsDe("Bloques y ladrillos")),
-        Filas("INS ENCHAPE", InsDe("Enchapes, pegante y boquilla (SUM)"))}),
+        Filas("INS CONCRETO", InsDe("Concreto", {"CONCRETO"})),
+        Filas("INS ACERO", InsDe("Acero", {"ACERO", "MALLA", "GRAFIL", "ALAMBRE"})),
+        Filas("INS MORTERO", InsDe("Morteros", {"MORTERO", "CEMENTO", "ARENA", "GROUT"})),
+        Filas("INS BLOQUES", InsDe("Bloques y ladrillos", {"BLOQUE", "LADRILLO"})),
+        Filas("INS ENCHAPE", InsDe("Enchapes, pegante y boquilla (SUM)", {"CERAMICA", "PORCELANATO", "ENCHAPE", "PEGANTE", "BOQUILLA", "ADHESIVO", "PEGACOR", "ALFAQUICK"}))}),
     ConOrden = List.Transform(List.Positions(Todo), each Todo{_} & {_}),
     Ordenada = Table.Sort(#table(type table [Lista = text, Valor = text, __i = number], ConOrden), {{"Lista", Order.Ascending}, {"__i", Order.Ascending}}),
     Final = Table.RemoveColumns(Ordenada, {"__i"})
