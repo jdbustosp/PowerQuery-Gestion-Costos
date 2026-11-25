@@ -102,7 +102,8 @@ let
     FnClaveMaestro = (v as any) as text =>
         if v is text and Record.HasFields(MemoMaestro, v) then Record.Field(MemoMaestro, v) else FnClaveMaestro0(v),
     MaestroFilas = try Table.SelectRows(
-            Table.SelectColumns(Excel.CurrentWorkbook(){[Name = "MaestroInsumos"]}[Content], {"Ins", "Clasificador"}),
+            (try Table.SelectColumns(Excel.CurrentWorkbook(){[Name = "MaestroInsumos"]}[Content], {"Ins", "Clasificador"})
+             otherwise Table.RenameColumns(Table.SelectColumns(Excel.CurrentWorkbook(){[Name = "CATALOGO_INSUMOS_CC"]}[Content], {"Ins", "Clasificador manual"}), {{"Clasificador manual", "Clasificador"}})),
             each FnTieneTexto([Clasificador]) and FnClaveMaestro([Ins]) <> "")
         otherwise #table({"Ins", "Clasificador"}, {}),
     ClasifMaestro = FnMapaModa(
@@ -663,8 +664,9 @@ let
     AdicConCC = Table.Combine({AdicConCC0, Table.AddColumn(AdicSinRegistro, "__Valor", each 0, type number)}),
     AdicFilas = Table.FromRecords(List.Transform(Table.ToRecords(AdicConCC), (r) => [
         #"Centro de Costos" = if r[__CC] <> null then r[__CC] else FnTextoODef(r[#"Centro de Costos"]),
-        Ins = "ADICIONAL",
-        Actividad = FnTextoODef(Record.FieldOrDefault(r, "Descripci#(00F3)n", null)),
+        // 2026-11-24: en la dinamica el nivel Actividad queda "ADICIONALES" (antes salia en blanco) y la descripcion baja a Ins
+        Ins = let d = FnTextoODef(Record.FieldOrDefault(r, "Descripci#(00F3)n", null)) in if d = "" then "ADICIONAL" else d,
+        Actividad = "ADICIONALES",
         Capitulo = Text.From((if r[__MaxCap] = null then 0 else r[__MaxCap]) + 1) & "-ADICIONALES",
         Subcapitulo = "ADICIONALES",
         Tipo = "ADICIONAL",
@@ -675,7 +677,31 @@ let
         type table [#"Centro de Costos" = text, Ins = text, Actividad = text, Capitulo = text, Subcapitulo = text,
             Tipo = text, #"# CC - Comparativo" = text, Clasificador = text,
             #"VT Proyectado Colsubsidio" = nullable number, #"VT Adicionales" = nullable number]),
-    ConAdicionales = Table.Combine({ClasifCompleto, AdicFilas}),
+    // POR CLASIFICAR (2026-11-24): saldo de los comparativos aprobados de POR_CONTRATAR que no tienen filas ADJUDICADO
+    // (no se proyectan en ningun capitulo). Los que si tienen ADJUDICADO ya proyectan su saldo alli (FnProyPorContratar).
+    PCNum = (v as any) as number => if v = null then 0 else try Number.From(v) otherwise 0,
+    PorClasif0 = if not PCActivo then #table({"__Cod", "Comparativo", "__Valor"}, {}) else
+        Table.SelectColumns(Table.AddColumn(Table.SelectRows(PC[Grupos], each not [Mostrar] and [Estado] <> "Cerrado"
+                and PCNum(Record.FieldOrDefault(_, "PptoAdj", 0)) = 0 and [Valor] >= 1000000 and [Valor] >= 0.02 * PCNum([Aprobado])),
+            "__Cod", each FnTextoODef(Text.BeforeDelimiter(FnTextoODef([Centro de Costos]), "-")), type text),
+            {"__Cod", "Comparativo", "Valor"}),
+    PorClasif = Table.ExpandTableColumn(Table.NestedJoin(Table.RenameColumns(PorClasif0, {{"Valor", "__Valor"}}, MissingField.Ignore),
+        {"__Cod"}, CCsBD, {"__Cod"}, "__B", JoinKind.Inner), "__B", {"__CC", "__MaxCap"}),
+    PorClasifFilas = Table.FromRecords(List.Transform(Table.ToRecords(PorClasif), (r) => [
+        #"Centro de Costos" = r[__CC],
+        Ins = FnTextoODef(r[Comparativo]),
+        Actividad = "POR CLASIFICAR",
+        Capitulo = Text.From((if r[__MaxCap] = null then 0 else r[__MaxCap]) + 1) & "-ADICIONALES",
+        Subcapitulo = "ADICIONALES",
+        Tipo = "POR CLASIFICAR",
+        #"# CC - Comparativo" = FnTextoODef(r[Comparativo]),
+        Clasificador = "zOtros",
+        #"VT Proyectado Colsubsidio" = r[__Valor],
+        #"VT Adicionales" = null]),
+        type table [#"Centro de Costos" = text, Ins = text, Actividad = text, Capitulo = text, Subcapitulo = text,
+            Tipo = text, #"# CC - Comparativo" = text, Clasificador = text,
+            #"VT Proyectado Colsubsidio" = nullable number, #"VT Adicionales" = nullable number]),
+    ConAdicionales = Table.Combine({ClasifCompleto, AdicFilas, PorClasifFilas}),
 
     FnNumONull = (v as any) as nullable number => try Number.From(v) otherwise null,
     ConAlmacen = Table.AddColumn(Table.AddColumn(ConAdicionales, "Cant. entradas", each

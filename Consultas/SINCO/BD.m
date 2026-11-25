@@ -65,7 +65,9 @@ let
                 {"__Comp", "Clasificador"}, {{"__S", each List.Sum([__V]), type number}}),
             m = Table.Group(g, {"__Comp"}, {{"__C", each Table.Max(_, "__S")[Clasificador], type text}})
         in Record.FromList(m[__C], m[__Comp]),
+    // Reglas manuales: tabla MaestroInsumos si existe; si no, columna "Clasificador manual" de CATALOGO_INSUMOS_CC
     Manual = try Excel.CurrentWorkbook(){[Name = "MaestroInsumos"]}[Content]
+             otherwise try Table.RenameColumns(Table.SelectColumns(Excel.CurrentWorkbook(){[Name = "CATALOGO_INSUMOS_CC"]}[Content], {"Ins", "Clasificador manual"}), {{"Clasificador manual", "Clasificador"}})
              otherwise #table(type table [Ins = nullable text, Clasificador = nullable text], {}),
     ManualValido = Table.SelectRows(Manual, each ClaveTexto([Ins]) <> "" and CategoriaValida([Clasificador])),
     ManualPorInsumo = IndiceUnico(
