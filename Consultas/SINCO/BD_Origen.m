@@ -44,7 +44,7 @@ let
     T_Contratos = CONTRATOS,
     T_Ppto = PPTO_BD,
     T_Comp = try COMPARATIVOS otherwise #table({"Tipo"}, {}),
-    T_Aprob = try APROBACIONES_SP otherwise #table({"Tipo"}, {}),
+    T_Aprob = Table.Buffer(try APROBACIONES_SP otherwise #table({"Tipo"}, {})),
     T_Prov = try PROVISIONES_SP otherwise #table({"Tipo"}, {}),
     T_Desc = try DESCUENTOS otherwise #table({"Tipo"}, {}),
     T_Disp = try DISPONIBLE otherwise #table({"Tipo"}, {}),
@@ -63,7 +63,7 @@ let
         "Capitulo_Costo directo", "Fecha_Factura"
     }, MissingField.Ignore),
 
-    LlavesLimpias0 = Table.TransformColumns(ColumnasReordenadas_Trim, {
+    LlavesLimpias0 = Table.Buffer(Table.TransformColumns(ColumnasReordenadas_Trim, {
         {"Centro de Costos",     each try (if _ = null then "" else Text.Upper(Text.Trim(Text.From(_)))) otherwise "", type text},
         {"Codigo act",           each try (if _ = null then "" else Text.Upper(Text.Trim(Text.From(_)))) otherwise "", type text},
         {"Ins",                  each try (if _ = null then "" else Text.Upper(Text.Trim(FnRemoveAccentMarks(_)))) otherwise "", type text},
@@ -74,7 +74,7 @@ let
         {"Descripcion contrato", each try FnRemoveAccentsSymbols(if _ = null then null else Text.Trim(Text.From(_))) otherwise null, type text},
 
         {"# CC - Comparativo",   each Text.Upper(F_Globales[FnNormalizeComparativo](_)), type text}
-    }, null, MissingField.Ignore),
+    }, null, MissingField.Ignore)),
     // SINCO puede renombrar un centro de costos y las fuentes traer nombres distintos para el mismo codigo:
     // se unifica por codigo (antes del primer "-") al nombre de las filas PPTO (o al mas frecuente) para que crucen las claves.
     FnCodCC = (s as text) as text => Text.Trim(Text.BeforeDelimiter(s, "-")),
@@ -182,9 +182,10 @@ let
         let i = FnBuscar(ClasifAprobIns, FnClaveCompIns(r)),
             c = if i <> null then i else FnBuscar(ClasifAprobComp, FnClaveComp(r))
         in if c <> null then c else FnBuscar(ClasifAprobSinCentro, FnClaveCompSinCentro(r)),
-    ClasifDetComp   = FnMapaModa(FnFilasClasif("CC"), FnClaveComp, "Clasificador"),
-    ClasifDetOCIns  = FnMapaModa(FnFilasClasif("CC"), FnClaveOCIns, "Clasificador"),
-    ClasifDetOC     = FnMapaUnico(FnFilasClasif("CC"), FnClaveOC, "Clasificador"),
+    FilasClasifCC = Table.Buffer(FnFilasClasif("CC")),  // tres consumidores
+    ClasifDetComp   = FnMapaModa(FilasClasifCC, FnClaveComp, "Clasificador"),
+    ClasifDetOCIns  = FnMapaModa(FilasClasifCC, FnClaveOCIns, "Clasificador"),
+    ClasifDetOC     = FnMapaUnico(FilasClasifCC, FnClaveOC, "Clasificador"),
 
     FilasPuente = Table.SelectRows(FiltroTipoValido, each [Tipo] = "CC" and FnCompReal([#"# CC - Comparativo"])),
     CompPorOCIns = FnMapaModa(FilasPuente, FnClaveOCIns, "# CC - Comparativo"),
@@ -200,10 +201,20 @@ let
             act = FnParseCodAct(r[Codigo act], r[Actividad])
         in if oc = null or cc = "" or (nivel > 0 and ins = "") or (nivel > 1 and act = "") then null
            else cc & "|" & oc & (if nivel > 0 then "|" & ins else "") & (if nivel > 1 then "|" & act else ""),
-    PuenteAseg = Table.Buffer(FilasPuente),
-    CompAsegExacto = FnMapaUnico(PuenteAseg, each FnClaveAseg(_, 2), "# CC - Comparativo"),
-    CompAsegInsumo = FnMapaUnico(PuenteAseg, each FnClaveAseg(_, 1), "# CC - Comparativo"),
-    CompAsegOC = FnMapaUnico(PuenteAseg, each FnClaveAseg(_, 0), "# CC - Comparativo"),
+    // Rendimiento (2026-11-26): las tres claves (niveles 0/1/2 de FnClaveAseg) se calculan una vez por fila.
+    FnClavesAseg = (r as record) as record =>
+        let oc = FnOCKeyValida(r[#"# OC / Contrato"]),
+            cc = FnClaveMaestro(r[Centro de Costos]),
+            k0 = if oc = null or cc = "" then null else cc & "|" & oc,
+            ins = FnClaveMaestro(r[Ins]),
+            k1 = if k0 = null or ins = "" then null else k0 & "|" & ins,
+            act = FnParseCodAct(r[Codigo act], r[Actividad]),
+            k2 = if k1 = null or act = "" then null else k1 & "|" & act
+        in [k0 = k0, k1 = k1, k2 = k2],
+    PuenteAseg = Table.Buffer(Table.AddColumn(FilasPuente, "__KA", each FnClavesAseg(_), type record)),
+    CompAsegExacto = FnMapaUnico(PuenteAseg, each [__KA][k2], "# CC - Comparativo"),
+    CompAsegInsumo = FnMapaUnico(PuenteAseg, each [__KA][k1], "# CC - Comparativo"),
+    CompAsegOC = FnMapaUnico(PuenteAseg, each [__KA][k0], "# CC - Comparativo"),
     // Una misma linea de OC puede venir en Det_CC bajo varios comparativos (p. ej. torres y urbanismo).
     // Si no hay uno unico, se toma el menor; FnCompPrincipal usa el mismo criterio para no contar doble.
     FnMapaPrimero = (tbl as table, claveFn as function, valorCol as text) as record =>
@@ -212,16 +223,17 @@ let
             grupos = Table.Group(conClave, {"__MK"}, {{"__MV", each List.Min(List.Select(Table.Column(_, valorCol), each _ is text and _ <> "")), type text}}),
             conValor = Table.SelectRows(grupos, each [__MV] <> null)
         in Record.FromList(conValor[__MV], conValor[__MK]),
-    CompAsegExactoP = FnMapaPrimero(PuenteAseg, each FnClaveAseg(_, 2), "# CC - Comparativo"),
-    CompAsegInsumoP = FnMapaPrimero(PuenteAseg, each FnClaveAseg(_, 1), "# CC - Comparativo"),
+    CompAsegExactoP = FnMapaPrimero(PuenteAseg, each [__KA][k2], "# CC - Comparativo"),
+    CompAsegInsumoP = FnMapaPrimero(PuenteAseg, each [__KA][k1], "# CC - Comparativo"),
     ConCruceAseg = Table.Buffer(Table.AddColumn(FiltroConClasif, "__AsegComparativo", each
         if not FnEsAsegurado(_) then null
         else
-            let exacto = FnBuscar(CompAsegExacto, FnClaveAseg(_, 2)),
-                insumo = if exacto <> null then exacto else FnBuscar(CompAsegInsumo, FnClaveAseg(_, 1)),
-                oc = if insumo <> null then insumo else FnBuscar(CompAsegOC, FnClaveAseg(_, 0)),
-                p2 = if oc <> null then oc else FnBuscar(CompAsegExactoP, FnClaveAseg(_, 2)),
-                p1 = if p2 <> null then p2 else FnBuscar(CompAsegInsumoP, FnClaveAseg(_, 1))
+            let ks = FnClavesAseg(_),
+                exacto = FnBuscar(CompAsegExacto, ks[k2]),
+                insumo = if exacto <> null then exacto else FnBuscar(CompAsegInsumo, ks[k1]),
+                oc = if insumo <> null then insumo else FnBuscar(CompAsegOC, ks[k0]),
+                p2 = if oc <> null then oc else FnBuscar(CompAsegExactoP, ks[k2]),
+                p1 = if p2 <> null then p2 else FnBuscar(CompAsegInsumoP, ks[k1])
             in if p1 = null then "SIN CUADRO COMPARATIVO" else p1, type text)),
     Etapa0 = Table.AddColumn(ConCruceAseg, "__ClasifComp", each
         let
@@ -309,6 +321,8 @@ let
         each let qa = ToNumber0([Cantidad asegurada]), vt = ToNumber0([VT Asegurada])
             in if qa <> 0 then vt / qa else 0, type number)),
 
+    AddVUAsegN = Table.Buffer(Table.SelectColumns(AddVUAseg, {"Tipo", "Centro de Costos", "Codigo act", "Ins", "# OC / Contrato",
+        "# CC - Comparativo", "VT Asegurada", "VT Proyectado", "VT Presupuesto", "Valor Total ppto (CC)", "VT CC cons"})),
     AgrupadoResumen = Table.Group(AddVUAseg, {"Centro de Costos", "Codigo act", "Ins"}, {
         {"vtProj", each List.Sum(List.Transform([VT Proyectado],       each ToNumber0(_))), type number},
         {"vtCons", each List.Sum(List.Transform([VT Consumido],        each ToNumber0(_))), type number},
@@ -344,7 +358,7 @@ let
     BaseConBanderasSafe = Table.ReplaceValue(BaseConBanderas, null, false, Replacer.ReplaceValue, ColsBanderas),
 
     AsegPorActividad = Table.Buffer(Table.Group(
-        Table.SelectRows(AddVUAseg, each [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS"),
+        Table.SelectRows(AddVUAsegN, each [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS"),
         {"Centro de Costos", "Codigo act"},
         {{"vtAsegAct", each List.Sum(List.Transform([VT Asegurada], each ToNumber0(_))), type number}})),
     ConAsegActividad = Table.ExpandTableColumn(
@@ -356,10 +370,10 @@ let
     FnEnConjunto = (s as record, v as any) as logical => v is text and Record.HasFields(s, v),
     FnOCKey = (v as any) as text => let k = CleanOCKey(v) in if k = null then "" else k,
     OCsAseguradas = List.Buffer(List.Distinct(List.Transform(
-        Table.SelectRows(AddVUAseg, each ([Tipo] = "CONTRATO" or [Tipo] = "COMPRAS") and ToNumber0([VT Asegurada]) <> 0)[#"# OC / Contrato"],
+        Table.SelectRows(AddVUAsegN, each ([Tipo] = "CONTRATO" or [Tipo] = "COMPRAS") and ToNumber0([VT Asegurada]) <> 0)[#"# OC / Contrato"],
         FnOCKey))),
     ComparativosContratados = List.Buffer(List.Distinct(List.Transform(
-        Table.SelectRows(AddVUAseg, each [Tipo] = "CC" and (let k = FnOCKey([#"# OC / Contrato"]) in k <> "" and FnEnConjunto(SetOCsAseguradas, k)))[#"# CC - Comparativo"],
+        Table.SelectRows(AddVUAsegN, each [Tipo] = "CC" and (let k = FnOCKey([#"# OC / Contrato"]) in k <> "" and FnEnConjunto(SetOCsAseguradas, k)))[#"# CC - Comparativo"],
         FnTextoODef))),
     SetOCsAseguradas = FnConjunto(OCsAseguradas),
     SetComparativosContratados = FnConjunto(ComparativosContratados),
@@ -371,10 +385,10 @@ let
         in if List.IsEmpty(n) then null else Text.Combine(n, "-"),
     FnDeFamilia = (c as nullable text, base as text) as logical => c <> null and (c = base or Text.StartsWith(c, base & "-")),
     PptoAdjPorComp = Table.Buffer(Table.Group(
-        Table.SelectRows(AddVUAseg, each [Tipo] = "ADJUDICADO" and [#"# CC - Comparativo"] is text and [#"# CC - Comparativo"] <> ""),
+        Table.SelectRows(AddVUAsegN, each [Tipo] = "ADJUDICADO" and [#"# CC - Comparativo"] is text and [#"# CC - Comparativo"] <> ""),
         {"# CC - Comparativo"}, {{"__P", each List.Sum(List.Transform([#"Valor Total ppto (CC)"], ToNumber0)), type number}})),
     CodigosAdj = FnConjunto(List.Transform(PptoAdjPorComp[#"# CC - Comparativo"], FnCodigoComp)),
-    ConsPorCodigo = let t = Table.SelectRows(Table.AddColumn(Table.SelectRows(AddVUAseg, each [Tipo] = "CC CONSOLIDADO"),
+    ConsPorCodigo = let t = Table.SelectRows(Table.AddColumn(Table.SelectRows(AddVUAsegN, each [Tipo] = "CC CONSOLIDADO"),
                 "__C", each FnCodigoComp([#"# CC - Comparativo"]), type text), each [__C] <> null)
         in Table.Buffer(Table.Group(t, {"__C"}, {{"__S", each List.Sum(List.Transform([VT CC cons], ToNumber0)), type number}})),
     CodigosContratados = List.Buffer(List.Select(List.Distinct(List.Transform(ComparativosContratados, FnCodigoComp)), each _ <> null)),
@@ -388,14 +402,14 @@ let
             ok = Table.SelectRows(conF, each [__F] <> null)
         in Record.FromList(ok[__F], ok[#"# CC - Comparativo"]),
     // Lo asegurado en la actividad con OC que no aparece en ningun CC puede ser ese mismo contrato sin cuadro: se descuenta.
-    SetOCsEnCC = FnConjunto(List.Select(List.Transform(Table.SelectRows(AddVUAseg, each [Tipo] = "CC")[#"# OC / Contrato"], FnOCKey), each _ <> "")),
+    SetOCsEnCC = FnConjunto(List.Select(List.Transform(Table.SelectRows(AddVUAsegN, each [Tipo] = "CC")[#"# OC / Contrato"], FnOCKey), each _ <> "")),
     FnSumaActividad = (t as table, valFn as function) as record =>
         let c = Table.SelectRows(Table.AddColumn(t, "__K", each FnClaveAct(_), type text), each [__K] <> null),
             g = Table.Group(Table.AddColumn(c, "__X", valFn, type number), {"__K"}, {{"__S", each List.Sum([__X]), type number}})
         in Record.FromList(g[__S], g[__K]),
-    AsegSueltoAct = FnSumaActividad(Table.SelectRows(AddVUAseg, each ([Tipo] = "CONTRATO" or [Tipo] = "COMPRAS")
+    AsegSueltoAct = FnSumaActividad(Table.SelectRows(AddVUAsegN, each ([Tipo] = "CONTRATO" or [Tipo] = "COMPRAS")
         and not FnEnConjunto(SetOCsEnCC, FnOCKey([#"# OC / Contrato"]))), each ToNumber0([VT Asegurada])),
-    ProyAprobAct = FnSumaActividad(Table.SelectRows(AddVUAseg, each [Tipo] = "ADJUDICADO" and FnBuscar(FactorAprobado, [#"# CC - Comparativo"]) <> null),
+    ProyAprobAct = FnSumaActividad(Table.SelectRows(AddVUAsegN, each [Tipo] = "ADJUDICADO" and FnBuscar(FactorAprobado, [#"# CC - Comparativo"]) <> null),
         each ToNumber0([#"Valor Total ppto (CC)"]) * FnBuscar(FactorAprobado, [#"# CC - Comparativo"])),
     FnProyAprobado = (r as record) as number =>
         let base = ToNumber0(r[#"Valor Total ppto (CC)"]) * FnBuscar(FactorAprobado, r[#"# CC - Comparativo"]),
@@ -405,7 +419,7 @@ let
 
     FnSumaPor = (tipo as text, valorCol as text, claveFn as function) as record =>
         let
-            filas = Table.SelectRows(AddVUAseg, each [Tipo] = tipo),
+            filas = Table.SelectRows(AddVUAsegN, each [Tipo] = tipo),
             conClave = Table.SelectRows(Table.AddColumn(filas, "__K", each claveFn(_), type text), each [__K] <> null),
             grupos = Table.Group(conClave, {"__K"}, {{"__S", each List.Sum(List.Transform(Table.Column(_, valorCol), ToNumber0)), type number}})
         in Record.FromList(grupos[__S], grupos[__K]),
@@ -433,7 +447,7 @@ let
     FnPCDe = (r as record) as nullable record =>
         if not PCActivo then null else
         let f = PCFamilia(r[Centro de Costos], r[#"# CC - Comparativo"]) in if f = null then null else Record.FieldOrDefault(PCPorFam, f, null),
-    PptoAdjPorGrupo = let t = Table.SelectRows(Table.AddColumn(Table.SelectRows(AddVUAseg, each [Tipo] = "ADJUDICADO"), "__G",
+    PptoAdjPorGrupo = let t = Table.SelectRows(Table.AddColumn(Table.SelectRows(AddVUAsegN, each [Tipo] = "ADJUDICADO"), "__G",
                 each let g = FnPCDe(_) in if g = null then null else g[__G], type text), each [__G] <> null),
             g = Table.Group(t, {"__G"}, {{"__S", each List.Sum(List.Transform([#"Valor Total ppto (CC)"], ToNumber0)), type number}})
         in Record.FromList(g[__S], g[__G]),
@@ -451,8 +465,8 @@ let
     // aportes...) proyecta max(ppto, asegurado): su POR ADJUDICAR lleva el saldo ppto - asegurado. Si el insumo
     // tiene filas CC o ADJUDICADO (comparativo o descarga aplicada) sigue las reglas de su comparativo.
     InsConComparativo = FnConjunto(List.Select(List.Transform(Table.ToRecords(
-        Table.SelectRows(AddVUAseg, each [Tipo] = "CC" or [Tipo] = "ADJUDICADO")), FnClaveIns), each _ <> null)),
-    AsegIns = let t = Table.SelectRows(Table.AddColumn(Table.SelectRows(AddVUAseg, each [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS"),
+        Table.SelectRows(AddVUAsegN, each [Tipo] = "CC" or [Tipo] = "ADJUDICADO")), FnClaveIns), each _ <> null)),
+    AsegIns = let t = Table.SelectRows(Table.AddColumn(Table.SelectRows(AddVUAsegN, each [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS"),
                 "__K", each FnClaveIns(_), type text), each [__K] <> null),
             g = Table.Group(t, {"__K"}, {{"__S", each List.Sum(List.Transform([VT Asegurada], ToNumber0)), type number}})
         in Record.FromList(g[__S], g[__K]),
@@ -465,20 +479,23 @@ let
         in if not ReglaAActiva or k = null or a <= 0 or FnEnConjunto(InsConComparativo, k) then null
            else let p = ToNumber0(FnBuscar(PptoIns, k)), tot = ToNumber0(FnBuscar(PorAdjIns, k))
                 in if tot = 0 then 0 else List.Max({0, p - a}) * ToNumber0(r[#"Valor Total ppto (CC)"]) / tot,
-    AplicarProyeccion = Table.AddColumn(ConAsegActividad, "VT Proyectado Colsubsidio", each
-        if [Tipo] = "POR ADJUDICAR" and FnReglaA(_) <> null then (if FnSincoEnCero(_) then 0 else FnReglaA(_))
-        else if [Tipo] = "POR ADJUDICAR" then (if ToNumber0([vtAsegAct]) > 0 or FnSincoEnCero(_) then 0 else [#"Valor Total ppto (CC)"])
-
-        else if [Tipo] = "ADJUDICADO" and FnProyPorContratar(_) <> null then FnProyPorContratar(_)
-
-        else if [Tipo] = "ADJUDICADO" and FnBuscar(FactorAprobado, [#"# CC - Comparativo"]) <> null then
-            (if FnSincoEnCero(_) then 0 else FnProyAprobado(_))
-        else if [Tipo] = "ADJUDICADO" then
-            (if FnEnConjunto(SetComparativosContratados, FnTextoODef([#"# CC - Comparativo"])) then 0
-             else if ToNumber0([vtAsegAct]) > 0 then 0
-             else if FnSincoEnCero(_) then 0
-             else [#"Valor Total ppto (CC)"])
-        else if [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS" then (if [VT Asegurada] <> 0 then [VT Asegurada] else null)
+    // Rendimiento (2026-11-25): cada regla se evalua una sola vez por fila (antes FnReglaA y FnProyPorContratar dos veces).
+    AplicarProyeccion = Table.AddColumn(ConAsegActividad, "VT Proyectado Colsubsidio", (r) =>
+        let t = r[Tipo] in
+        if t = "POR ADJUDICAR" then
+            let ra = FnReglaA(r) in
+            if ra <> null then (if FnSincoEnCero(r) then 0 else ra)
+            else (if ToNumber0(r[vtAsegAct]) > 0 or FnSincoEnCero(r) then 0 else r[#"Valor Total ppto (CC)"])
+        else if t = "ADJUDICADO" then
+            let pc = FnProyPorContratar(r) in
+            if pc <> null then pc
+            else if FnBuscar(FactorAprobado, r[#"# CC - Comparativo"]) <> null then
+                (if FnSincoEnCero(r) then 0 else FnProyAprobado(r))
+            else if FnEnConjunto(SetComparativosContratados, FnTextoODef(r[#"# CC - Comparativo"])) then 0
+            else if ToNumber0(r[vtAsegAct]) > 0 then 0
+            else if FnSincoEnCero(r) then 0
+            else r[#"Valor Total ppto (CC)"]
+        else if t = "CONTRATO" or t = "COMPRAS" then (if r[#"VT Asegurada"] <> 0 then r[#"VT Asegurada"] else null)
         else null,
     type number),
 
@@ -500,7 +517,7 @@ let
     RelKeys = Table.Buffer(Table.AddColumn(RelKeys1, "__NoProv_Key", each CleanKeyText([No_Prov]), type text)),
 
     ProvisionesPorOC = Table.Buffer(Table.Group(
-        Table.SelectRows(RelKeys, each [__OC_Key] <> null and [__NoProv_Key] <> null),
+        Table.SelectRows(Table.SelectColumns(RelKeys, {"__OC_Key", "__NoProv_Key"}), each [__OC_Key] <> null and [__NoProv_Key] <> null),
         {"__OC_Key"},
         {{"No_Prov OC", each
             let nums = List.Sort(List.Distinct(List.RemoveNulls([__NoProv_Key])))
@@ -577,9 +594,26 @@ let
     RellenoJoin1 = Table.ExpandTableColumn(
         Table.NestedJoin(BaseRelleno, {"Centro de Costos", "__CodKey"}, MapaSubcapAct, {"Centro de Costos", "__CodKey"}, "__SP", JoinKind.LeftOuter),
         "__SP", {"subcapAct"}),
-    RellenoJoin2 = Table.ExpandTableColumn(
-        Table.NestedJoin(RellenoJoin1, {"Centro de Costos"}, SubcapConocidos, {"Centro de Costos"}, "__SC", JoinKind.LeftOuter),
-        "__SC", {"__ListaSubcaps"}),
+    // Rendimiento (2026-11-25): la lista de subcapitulos por CC se busca en un registro y el candidato se calcula
+    // una vez por (CC, actividad) distinta (antes se recorria la lista en cada fila).
+    FnKCC = (cc as any) as text => if cc = null then "" else Text.From(cc),
+    MapaSubcapsCC = Record.FromList(SubcapConocidos[__ListaSubcaps], List.Transform(SubcapConocidos[Centro de Costos], FnKCC)),
+    FnCandSubcap = (cc as any, actTxt as text) as nullable text =>
+        let
+            sinUM = if Text.EndsWith(actTxt, ")") and Text.Contains(actTxt, "(")
+                    then Text.Trim(Text.BeforeDelimiter(actTxt, "(", {0, RelativePosition.FromEnd}))
+                    else actTxt,
+            sinUMN = FnNormSubcap(sinUM),
+            l0 = Record.FieldOrDefault(MapaSubcapsCC, FnKCC(cc), null),
+            lista = if l0 = null then {} else l0,
+            cand = List.First(List.Select(lista, each [Norm] <> "" and Text.EndsWith(sinUMN, [Norm])), null)
+        in if cand <> null then cand[Orig] else null,
+    SepSub = "#(0001)",
+    MemoCandSubcap = let
+            k = List.Distinct(List.Transform(Table.ToRecords(Table.SelectColumns(Table.SelectRows(RellenoJoin1, each EsSubcapVacio([Subcapitulo])),
+                    {"Centro de Costos", "Actividad"})), each FnKCC([Centro de Costos]) & SepSub & FnTextoODef([Actividad])))
+        in Record.FromList(List.Transform(k, each let p = Text.Split(_, SepSub) in FnCandSubcap(if p{0} = "" then null else p{0}, p{1})), k),
+    RellenoJoin2 = RellenoJoin1,
 
     RellenoCalc = Table.AddColumn(RellenoJoin2, "__SubcapFill", each
         if not EsSubcapVacio([Subcapitulo]) then [Subcapitulo]
@@ -593,13 +627,8 @@ let
             else if not EsSubcapVacio([subcapAct]) then [subcapAct]
             else
               let
-                sinUM = if Text.EndsWith(actTxt, ")") and Text.Contains(actTxt, "(")
-                        then Text.Trim(Text.BeforeDelimiter(actTxt, "(", {0, RelativePosition.FromEnd}))
-                        else actTxt,
-                sinUMN = FnNormSubcap(sinUM),
-                lista = if [__ListaSubcaps] = null then {} else [__ListaSubcaps],
-                cand = List.First(List.Select(lista, each [Norm] <> "" and Text.EndsWith(sinUMN, [Norm])), null)
-              in if cand <> null then cand[Orig] else null,
+                kc = FnKCC([Centro de Costos]) & SepSub & actTxt
+              in if Record.HasFields(MemoCandSubcap, kc) then Record.Field(MemoCandSubcap, kc) else FnCandSubcap([Centro de Costos], actTxt),
         type text),
 
     RellenoFinal = Table.RenameColumns(
@@ -929,7 +958,7 @@ let
         in if esProv and enPar <> null and (ocCero or Record.HasFields(MapaParCero, par)) then enPar
             else if ocCero then Record.Field(MapaPrimeraOC, oc) else fac,
     ConFacturaFinal = Table.AddColumn(Table.RenameColumns(ConRealBase, {{"Factura", "__FacturaBase"}}), "Factura", each FnFacturaFinal([OC], [__FacturaBase], [Fila real], [#"No_Prov seg"]), type text),
-    ConApoyo = Table.Combine({ConFacturaFinal, FilasProv, FilasTeo}),
+    ConApoyo = Table.Buffer(Table.Combine({ConFacturaFinal, FilasProv, FilasTeo})),
 
     // Asegurado clasificado = lo aprobado en el CC para la linea de OC, contado una sola vez y sin pasar
     // del total asegurado en SINCO para esa OC (tope por OC: los nombres de insumo del CC y de la OC no siempre coinciden).
@@ -998,13 +1027,14 @@ let
     FnParteComp = (s as any, campo as text) as nullable text =>
         let r = if s is text and Record.HasFields(MemoPartesComp, s) then Record.Field(MemoPartesComp, s) else null
         in if r = null then null else Record.Field(r, campo),
-    ConNumComp = Table.AddColumn(ConComparativoAseg, "__NumComp", each
+    ParesNum = Table.Buffer(Table.AddColumn(
+        Table.Distinct(Table.SelectColumns(ConComparativoAseg, {"Tipo", "Centro de Costos", "# CC - Comparativo"})), "__NumComp", each
         let n = FnParteComp([#"# CC - Comparativo"], "Num")
-        in if n = null then null else FnClaveMaestro([Centro de Costos]) & "|" & n, type text),
-    FilasNumCC    = Table.SelectRows(ConNumComp, each [Tipo] = "CC" and [__NumComp] <> null),
+        in if n = null then null else FnClaveMaestro([Centro de Costos]) & "|" & n, type text)),
+    FilasNumCC    = Table.SelectRows(ParesNum, each [Tipo] = "CC" and [__NumComp] <> null),
     ClavesCompCC  = let k = List.Distinct(FilasNumCC[__NumComp]) in Record.FromList(k, k),
     NombreCompCC  = FnMapaUnico(FilasNumCC, each [__NumComp], "# CC - Comparativo"),
-    NombreCompCon = FnMapaUnico(Table.SelectRows(ConNumComp, each [Tipo] = "CC CONSOLIDADO"), each [__NumComp], "# CC - Comparativo"),
+    NombreCompCon = FnMapaUnico(Table.SelectRows(ParesNum, each [Tipo] = "CC CONSOLIDADO"), each [__NumComp], "# CC - Comparativo"),
     // Si SINCO (filas CC) tiene la clave con varios nombres, no se unifica (no se usa CC CONSOLIDADO).
     FnCompUnificado = (k as nullable text, actual as any) as any =>
         let m = if k = null then null
@@ -1012,9 +1042,17 @@ let
                 else Record.FieldOrDefault(NombreCompCon, k, null)
         in if m = null or m = actual then actual
            else if FnParteComp(m, "Palabra") = FnParteComp(actual, "Palabra") then m else actual,
-    ConCompUnificado0 = Table.AddColumn(ConNumComp, "__CompUnificado", each FnCompUnificado([__NumComp], [#"# CC - Comparativo"]), type text),
-    ConCompUnificado = Table.RenameColumns(
-        Table.RemoveColumns(ConCompUnificado0, {"# CC - Comparativo", "__NumComp"}), {{"__CompUnificado", "# CC - Comparativo"}}),
+    // Rendimiento (v4): se resuelve una vez por par (CC, comparativo) y solo se guardan los que cambian.
+    MapaCompUnificado = let
+            p = Table.Distinct(Table.SelectColumns(Table.SelectRows(ParesNum, each [#"# CC - Comparativo"] is text),
+                {"Centro de Costos", "# CC - Comparativo", "__NumComp"}), {"Centro de Costos", "# CC - Comparativo"}),
+            u = Table.AddColumn(p, "__U", each FnCompUnificado([__NumComp], [#"# CC - Comparativo"])),
+            c = Table.Distinct(Table.AddColumn(Table.SelectRows(u, each [__U] <> [#"# CC - Comparativo"]), "__R",
+                each FnTextoODef([Centro de Costos]) & "||" & [#"# CC - Comparativo"], type text), {"__R"})
+        in Record.FromList(c[__U], c[__R]),
+    ConCompUnificado = Table.ReplaceValue(ConComparativoAseg, each [#"# CC - Comparativo"],
+        each let a = [#"# CC - Comparativo"] in if a is text then Record.FieldOrDefault(MapaCompUnificado, FnTextoODef([Centro de Costos]) & "||" & a, a) else a,
+        Replacer.ReplaceValue, {"# CC - Comparativo"}),
     ConCantidadAsegSINCO = Table.AddColumn(ConCompUnificado, "Cantidad asegurada SINCO", each
         if [Tipo] = "CONTRATO" or [Tipo] = "COMPRAS" then ToNumber0([Cantidad asegurada]) else 0, type number),
     ConValorAsegSINCO = Table.AddColumn(ConCantidadAsegSINCO, "VT asegurado SINCO", each
@@ -1039,8 +1077,8 @@ let
                  porFact = if r[OC] = null then null else Record.FieldOrDefault(ClasifFactT, r[OC] & "|" & FnFacturaDin(r[Factura]), null)
              in if co <> null and co <> "Varios clasificadores" and co <> "(sin clasificador)" then co
                 else if porFact <> null then porFact else co,
-    ConClasifFactura = Table.RenameColumns(Table.RemoveColumns(Table.AddColumn(ConValorAsegSINCO, "__ClasifF", FnClasifFactura, type text),
-        {"Clasificador"}), {{"__ClasifF", "Clasificador"}}),
+    ConClasifFactura = Table.Buffer(Table.RenameColumns(Table.RemoveColumns(Table.AddColumn(ConValorAsegSINCO, "__ClasifF", FnClasifFactura, type text),
+        {"Clasificador"}), {{"__ClasifF", "Clasificador"}})),
     // Fecha de aprobacion del comparativo (APROBACIONES_SP), por CC + numero de comparativo: la ultima.
     FnKeyFechaComp = (cc as any, comp as any) as nullable text =>
         let p = if comp is text and comp <> "" then FnPartesComp(comp) else null
@@ -1052,16 +1090,26 @@ let
         in Record.FromList(g[__F], g[__K]),
     FnKeyFila = (r as record) as text => FnTextoODef(r[Centro de Costos]) & "||" & FnTextoODef(r[#"# CC - Comparativo"]),
     MemoFechaComp = let
-            p = Table.Distinct(Table.AddColumn(Table.SelectColumns(ConClasifFactura, {"Centro de Costos", "# CC - Comparativo"}), "__R", FnKeyFila, type text), {"__R"}),
+            p = Table.Distinct(Table.AddColumn(Table.Distinct(Table.SelectColumns(ConClasifFactura, {"Centro de Costos", "# CC - Comparativo"})), "__R", FnKeyFila, type text), {"__R"}),
             f = Table.SelectRows(Table.AddColumn(p, "__F", each
                     let k = FnKeyFechaComp([Centro de Costos], [#"# CC - Comparativo"]) in if k = null then null else Record.FieldOrDefault(FechaComp, k, null)),
                 each [__F] <> null)
         in Record.FromList(f[__F], f[__R]),
     ConFechaAprob = Table.AddColumn(ConClasifFactura, "Fecha aprobacion", each
         Record.FieldOrDefault(MemoFechaComp, FnKeyFila(_), null), type nullable date),
-    FinalRecortada = Table.SelectColumns(ConFechaAprob, ColumnasFinalesArboleda & {"OC", "Tipo OC", "CC OC", "Contratista OC", "Clasificador OC", "Factura", "Invertido factura", "No_Prov seg", "Fila real", "Aseg prov", "Comp prov", "Inv prov", "Desc prov", "Teorico fijo", "Clasif desperdicio", "Contratista almacen", "VT Adicionales",
+    // No_Prov seg es la columna de provision (mas completa); en PROVISIONES sin enlace toma el No_Prov propio.
+    ConProvSeg = Table.ReplaceValue(ConFechaAprob, each [#"No_Prov seg"], each
+        if [Tipo] = "PROVISIONES" and ([#"No_Prov seg"] = null or [#"No_Prov seg"] = "(otros registros)") and [No_Prov] <> null
+        then Text.From([No_Prov]) else [#"No_Prov seg"], Replacer.ReplaceValue, {"No_Prov seg"}),
+    // Columnas de apoyo que no se publican en BD (Juan, 2026-11-26).
+    // Columnas internas que no se publican en la hoja BD (ninguna dinamica, formula ni consulta las usa).
+    // OJO: "Fila real", "Aseg prov", "Comp prov", "Inv prov", "Desc prov" las usan campos calculados de las dinamicas
+    // ("Asegurado seg", "Entradas seg"...) y "V/U asegurada" la lee SINCO.m desde la hoja BD: NO quitarlas.
+    ColsNoPublicar = {"#SALIDA", "V/U aprobacion", "V/U CC cons", "No_Prov", "V/U ppto (CC)", "CC OC",
+        "Contratista OC", "Clasificador OC", "Contratista almacen"},
+    FinalRecortada = Table.SelectColumns(ConProvSeg, List.RemoveItems(ColumnasFinalesArboleda & {"OC", "Tipo OC", "CC OC", "Contratista OC", "Clasificador OC", "Factura", "Invertido factura", "No_Prov seg", "Fila real", "Aseg prov", "Comp prov", "Inv prov", "Desc prov", "Teorico fijo", "Clasif desperdicio", "Contratista almacen", "VT Adicionales",
         "Cant. entradas", "Cant. salidas", "Cant. teorica", "Material", "Tipologia", "TipoElemento", "Piso", "Codigo ins", "Cantidad SINCO clasificado", "VT SINCO clasificado", "Cantidad asegurada SINCO", "VT asegurado SINCO", "Fecha aprobacion",
-        "Estado", "Fecha_de_pago", "VR_antes_de_IVA", "VR_IVA", "VR_Bruto", "Anticipos", "Retegarantia", "Rte_Fte", "Rte_ICA", "Rte_IVA", "Rte_FIC", "Descuentos", "Valor_A_Girar", "Validacion"}, MissingField.UseNull),
+        "Estado", "Fecha_de_pago", "VR_antes_de_IVA", "VR_IVA", "VR_Bruto", "Anticipos", "Retegarantia", "Rte_Fte", "Rte_ICA", "Rte_IVA", "Rte_FIC", "Descuentos", "Valor_A_Girar", "Validacion"}, ColsNoPublicar), MissingField.UseNull),
 
     TablaMaestraFinal = Table.Buffer(LimpiarTabla(FinalRecortada))
 in

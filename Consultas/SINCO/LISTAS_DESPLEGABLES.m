@@ -4,8 +4,8 @@
 // Reemplaza el bloque de formulas FILTRAR/UNICOS (que no se pueden usar directo en una validacion).
 // Se actualiza al refrescar (no en vivo).
 let
-    Libro = Excel.CurrentWorkbook(),
-    Tabla = (n as text) as table => try Libro{[Name = n]}[Content] otherwise #table({}, {}),
+    // Rendimiento: cada tabla se pide por nombre (indexar una copia de Excel.CurrentWorkbook() cargaba todas, BD incluida)
+    Tabla = (n as text) as table => try Excel.CurrentWorkbook(){[Name = n]}[Content] otherwise #table({}, {}),
     Txt = (v as any) as text => if v = null then "" else Text.Trim(Text.From(v)),
     Norm = (v as any) as text => Text.Replace(Text.Replace(Text.Upper(Txt(v)), Character.FromNumber(209), "N"), Character.FromNumber(241), "N"),
     Col = (t as table, c as text) as list => if Table.HasColumns(t, c) then Table.Column(t, c) else List.Repeat({null}, Table.RowCount(t)),
@@ -34,7 +34,8 @@ let
         (Text.StartsWith(_, "CONCRETO ") or Text.StartsWith(_, "M_CONCRETO ")) and Text.EndsWith(_, "(M3)")))),
     // ASIGNACION: estructuras/edificaciones
     Estructuras = List.Sort(List.Distinct(List.Select(List.Transform(Col(Tabla("ASIGNACION"), "Estructura"), Txt), each _ <> ""))),
-    Todo = List.Combine({
+    // Rendimiento: List.Buffer (sin el, ConOrden indexaba Todo{i} y recalculaba todas las listas en cada fila: ~30 s)
+    Todo = List.Buffer(List.Combine({
         Filas("CONCRETO MEMORIAS", InsConcretoMem),
         Filas("ESTRUCTURAS", Estructuras),
         Filas("MAT MAMP", CatSel("Mamposteria", "Material", null, "Tipo")),
@@ -49,7 +50,7 @@ let
         Filas("INS ACERO", InsDe("Acero", {"ACERO", "MALLA", "GRAFIL", "ALAMBRE"})),
         Filas("INS MORTERO", InsDe("Morteros", {"MORTERO", "CEMENTO", "ARENA", "GROUT"})),
         Filas("INS BLOQUES", InsDe("Bloques y ladrillos", {"BLOQUE", "LADRILLO"})),
-        Filas("INS ENCHAPE", InsDe("Enchapes, pegante y boquilla (SUM)", {"CERAMICA", "PORCELANATO", "ENCHAPE", "PEGANTE", "BOQUILLA", "ADHESIVO", "PEGACOR", "ALFAQUICK"}))}),
+        Filas("INS ENCHAPE", InsDe("Enchapes, pegante y boquilla (SUM)", {"CERAMICA", "PORCELANATO", "ENCHAPE", "PEGANTE", "BOQUILLA", "ADHESIVO", "PEGACOR", "ALFAQUICK"}))})),
     ConOrden = List.Transform(List.Positions(Todo), each Todo{_} & {_}),
     Ordenada = Table.Sort(#table(type table [Lista = text, Valor = text, __i = number], ConOrden), {{"Lista", Order.Ascending}, {"__i", Order.Ascending}}),
     Final = Table.RemoveColumns(Ordenada, {"__i"})
